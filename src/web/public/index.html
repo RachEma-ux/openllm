@@ -143,6 +143,26 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 /* Toast */
 .toast{position:fixed;bottom:20px;right:20px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:13px;color:var(--text);z-index:999;animation:fadein .2s}
 
+/* Settings Panel */
+#settings{flex:1;display:none;flex-direction:column;overflow-y:auto;padding:24px 16px}
+#settings.show{display:flex}
+#settings h2{font-size:18px;font-weight:700;margin-bottom:20px}
+.settings-section{margin-bottom:24px}
+.settings-section h3{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);margin-bottom:10px}
+.setting-row{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:6px}
+.setting-label{font-size:14px;flex:1}
+.setting-value{font-size:13px;color:var(--dim);text-align:right;max-width:60%}
+.setting-input{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;color:var(--text);font-size:14px;font-family:inherit;width:100%;margin-top:6px}
+.setting-input:focus{outline:none;border-color:var(--accent)}
+.setting-btn{padding:10px 16px;border-radius:8px;border:none;font-size:14px;font-weight:600;cursor:pointer;width:100%}
+.setting-btn-primary{background:var(--accent);color:#fff}
+.setting-btn-primary:hover{background:#818cf8}
+.setting-btn-danger{background:#2a1a1a;color:var(--red);border:1px solid #3a2020}
+.setting-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.setting-dot-green{background:var(--green)}
+.setting-dot-red{background:var(--red)}
+.setting-dot-yellow{background:var(--yellow)}
+
 /* Mobile */
 @media(max-width:700px){
   .rail{display:none}
@@ -317,6 +337,65 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
     </div>
   </div>
 
+    <!-- SETTINGS VIEW -->
+    <div id="settings">
+      <h2>Settings</h2>
+
+      <div class="settings-section">
+        <h3>Connection</h3>
+        <div class="setting-row">
+          <span class="setting-label">Status</span>
+          <span class="setting-value" id="settings-status">Checking...</span>
+          <span class="setting-dot setting-dot-yellow" id="settings-dot" style="margin-left:8px"></span>
+        </div>
+        <div class="setting-row" style="flex-direction:column;align-items:stretch">
+          <span class="setting-label">Remote Agent URL</span>
+          <input class="setting-input" id="remote-url" type="url" placeholder="wss://xxx.trycloudflare.com/ws" value="">
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="setting-btn setting-btn-primary" style="flex:1" onclick="connectRemote()">Connect</button>
+            <button class="setting-btn" style="flex:1;background:var(--bg3);color:var(--text)" onclick="connectLocal()">Use Local</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Platform</span>
+          <span class="setting-value" id="settings-platform">—</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Memory</span>
+          <span class="setting-value" id="settings-memory">—</span>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Ollama</h3>
+        <div class="setting-row">
+          <span class="setting-label">Status</span>
+          <span class="setting-value" id="ollama-status">Checking...</span>
+          <span class="setting-dot setting-dot-yellow" id="ollama-dot" style="margin-left:8px"></span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Models</span>
+          <span class="setting-value" id="ollama-models">—</span>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Sessions</h3>
+        <div class="setting-row">
+          <span class="setting-label">Stored sessions</span>
+          <span class="setting-value" id="session-count">0</span>
+        </div>
+        <button class="setting-btn setting-btn-danger" onclick="clearAllData()">Clear All Data</button>
+      </div>
+
+      <div class="settings-section">
+        <h3>About</h3>
+        <div class="setting-row"><span class="setting-label">OpenLLM</span><span class="setting-value">v1.0.0</span></div>
+        <div class="setting-row"><span class="setting-label">Engine</span><span class="setting-value" id="settings-engine">node-server (chat)</span></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Mobile Bottom Nav -->
   <div class="mobile-nav" style="display:none;flex-shrink:0;border-top:1px solid var(--border);background:var(--bg2);padding:6px 0;padding-bottom:calc(6px + env(safe-area-inset-bottom))">
     <div style="display:flex;justify-content:space-around;align-items:center">
@@ -430,7 +509,11 @@ function goHome(){
   chatEl.classList.remove('show');
   homeEl.classList.remove('hide');
 }
-function newSession(){openChat('New Session')}
+function newSession(){
+  currentSessionId='s_'+Date.now();
+  currentMessages=[];
+  openChat('New Session');
+}
 
 /* ── Tabs ── */
 function switchTab(name,el){
@@ -474,8 +557,8 @@ let wsRetry=null;
 function connectWS(){
   if(wsRetry){clearTimeout(wsRetry);wsRetry=null}
   try{
-    const proto=location.protocol==='https:'?'wss:':'ws:';
-    ws=new WebSocket(proto+'//'+location.host+'/ws');
+    const wsUrl=remoteWsUrl||(location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/ws';
+    ws=new WebSocket(wsUrl);
     ws.onopen=()=>{$('#status-badge').textContent='● Connected';$('#status-badge').style.color='var(--green)'};
     ws.onclose=()=>{$('#status-badge').textContent='● Reconnecting...';$('#status-badge').style.color='var(--yellow)';ws=null;wsRetry=setTimeout(connectWS,2000)};
     ws.onerror=()=>{};
@@ -576,7 +659,19 @@ function addProject(){
 renderAvatars();
 renderHome();
 selectProvider('ollama');
+// Restore remote URL from localStorage
+remoteWsUrl=null;
+const savedRemote=localStorage.getItem('openllm-remote-url');
+if(savedRemote){
+  let u=savedRemote;
+  if(u.startsWith('https://'))u='wss://'+u.slice(8);
+  if(u.startsWith('http://'))u='ws://'+u.slice(7);
+  if(!u.endsWith('/ws'))u=u.replace(/\/$/,'')+'/ws';
+  remoteWsUrl=u;
+}
 connectWS();
+// Load saved sessions into home page
+loadSavedSessions();
 
 // Fetch available providers and mark unconfigured ones
 fetch('/api/providers').then(r=>r.json()).then(data=>{
@@ -602,19 +697,204 @@ function fetchOllamaModels(){
 }
 fetchOllamaModels();
 
-/* ── Mobile Settings Toggle ── */
-function toggleMobileSettings(){
-  const msg = [
-    '⚙️ OpenLLM Settings',
-    '',
-    'Provider: ' + currentProvider,
-    'Model: ' + currentModel,
-    'Status: ' + ($('#status-badge')?.textContent || 'unknown'),
-    '',
-    'Change provider/model in the toolbar above the composer.',
-    'Remote agent: set URL in address bar.',
-  ].join('\n');
-  alert(msg);
+/* ── Settings View ── */
+const settingsEl=$('#settings');
+function toggleMobileSettings(){ showSettings() }
+
+function showSettings(){
+  homeEl.classList.add('hide');
+  chatEl.classList.remove('show');
+  settingsEl.classList.add('show');
+  view='settings';
+  refreshSettings();
+}
+function hideSettings(){
+  settingsEl.classList.remove('show');
+}
+
+function refreshSettings(){
+  // Connection status
+  const dot=$('#settings-dot');
+  const st=$('#settings-status');
+  if(ws&&ws.readyState===1){st.textContent='Connected';dot.className='setting-dot setting-dot-green'}
+  else{st.textContent='Disconnected';dot.className='setting-dot setting-dot-red'}
+
+  // Load remote URL from storage
+  const saved=localStorage.getItem('openllm-remote-url');
+  if(saved) $('#remote-url').value=saved;
+
+  // Fetch server status
+  fetch('/api/status').then(r=>r.json()).then(d=>{
+    $('#settings-platform').textContent=d.platform+' / '+d.arch+(d.termux?' (Termux)':'');
+    $('#settings-memory').textContent=d.memory.rss+'MB RSS / '+d.memory.heap+'MB heap';
+    $('#settings-engine').textContent=d.termux?'node-server (chat-only, Termux)':'node-server (chat)';
+  }).catch(()=>{});
+
+  // Ollama status
+  fetch('/api/ollama-models').then(r=>r.json()).then(models=>{
+    const odot=$('#ollama-dot');
+    const ost=$('#ollama-status');
+    if(models.length>0){
+      ost.textContent='Running';odot.className='setting-dot setting-dot-green';
+      $('#ollama-models').textContent=models.join(', ');
+    }else{
+      ost.textContent='No models';odot.className='setting-dot setting-dot-yellow';
+    }
+  }).catch(()=>{
+    $('#ollama-status').textContent='Offline';
+    $('#ollama-dot').className='setting-dot setting-dot-red';
+  });
+
+  // Session count
+  dbCountSessions().then(n=>{$('#session-count').textContent=n});
+}
+
+// Update goHome to also hide settings
+const _goHome=goHome;
+goHome=function(){
+  hideSettings();
+  view='home';
+  chatEl.classList.remove('show');
+  homeEl.classList.remove('hide');
+}
+
+// Update openChat to also hide settings
+const _openChat=openChat;
+openChat=function(title){
+  hideSettings();
+  view='chat';
+  homeEl.classList.add('hide');
+  chatEl.classList.add('show');
+  chatTitle.textContent=title||'New Session';
+  messagesEl.innerHTML='';
+  streamBuf='';streaming=false;
+  inputEl.focus();
+}
+
+/* ── Remote Agent Connection ── */
+let remoteWsUrl=null;
+
+function connectRemote(){
+  const url=$('#remote-url').value.trim();
+  if(!url){alert('Enter a remote URL');return}
+  // Normalize: if user pastes https:// URL, convert to wss:///ws
+  let wsUrl=url;
+  if(wsUrl.startsWith('https://'))wsUrl='wss://'+wsUrl.slice(8);
+  if(wsUrl.startsWith('http://'))wsUrl='ws://'+wsUrl.slice(7);
+  if(!wsUrl.endsWith('/ws'))wsUrl=wsUrl.replace(/\/$/,'')+'/ws';
+  remoteWsUrl=wsUrl;
+  localStorage.setItem('openllm-remote-url',url);
+  // Disconnect current and reconnect to remote
+  if(ws){try{ws.close()}catch(e){}}
+  connectWS();
+  setTimeout(refreshSettings,2000);
+}
+
+function connectLocal(){
+  remoteWsUrl=null;
+  localStorage.removeItem('openllm-remote-url');
+  if(ws){try{ws.close()}catch(e){}}
+  connectWS();
+  setTimeout(refreshSettings,2000);
+}
+
+/* ── IndexedDB Session Storage ── */
+let db=null;
+function openDB(){
+  return new Promise((resolve,reject)=>{
+    if(db){resolve(db);return}
+    const req=indexedDB.open('openllm',1);
+    req.onupgradeneeded=(e)=>{
+      const d=e.target.result;
+      if(!d.objectStoreNames.contains('sessions')){
+        d.createObjectStore('sessions',{keyPath:'id'});
+      }
+    };
+    req.onsuccess=(e)=>{db=e.target.result;resolve(db)};
+    req.onerror=(e)=>reject(e);
+  });
+}
+async function dbSaveSession(id,title,messages){
+  const d=await openDB();
+  const tx=d.transaction('sessions','readwrite');
+  tx.objectStore('sessions').put({id,title,messages,updatedAt:Date.now()});
+}
+async function dbGetSessions(){
+  const d=await openDB();
+  return new Promise((resolve)=>{
+    const tx=d.transaction('sessions','readonly');
+    const req=tx.objectStore('sessions').getAll();
+    req.onsuccess=()=>resolve(req.result.sort((a,b)=>b.updatedAt-a.updatedAt));
+    req.onerror=()=>resolve([]);
+  });
+}
+async function dbCountSessions(){
+  const d=await openDB();
+  return new Promise((resolve)=>{
+    const tx=d.transaction('sessions','readonly');
+    const req=tx.objectStore('sessions').count();
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>resolve(0);
+  });
+}
+async function dbDeleteSession(id){
+  const d=await openDB();
+  const tx=d.transaction('sessions','readwrite');
+  tx.objectStore('sessions').delete(id);
+}
+async function dbClearAll(){
+  const d=await openDB();
+  const tx=d.transaction('sessions','readwrite');
+  tx.objectStore('sessions').clear();
+}
+
+// Save current chat session
+let currentSessionId=null;
+let currentMessages=[];
+function saveCurrentSession(){
+  if(!currentSessionId)return;
+  dbSaveSession(currentSessionId,chatTitle.textContent,currentMessages);
+}
+
+// Auto-save after each message
+const _appendMsg=appendMsg;
+appendMsg=function(role,text){
+  _appendMsg(role,text);
+  currentMessages.push({role,text,time:Date.now()});
+  saveCurrentSession();
+}
+
+// Load saved sessions on home page
+async function loadSavedSessions(){
+  const sessions=await dbGetSessions();
+  if(!sessions.length)return;
+  const list=$('#home-list');
+  if(!list)return;
+  list.innerHTML='';
+  sessions.slice(0,10).forEach(s=>{
+    const el=document.createElement('div');
+    el.className='hcard';
+    const ago=Math.round((Date.now()-s.updatedAt)/60000);
+    const timeStr=ago<60?ago+'m ago':Math.round(ago/60)+'h ago';
+    el.innerHTML='<div class="t">'+esc(s.title)+'</div><div class="m">'+timeStr+' · '+s.messages.length+' msgs</div>';
+    el.onclick=()=>resumeSession(s);
+    list.appendChild(el);
+  });
+}
+
+function resumeSession(s){
+  currentSessionId=s.id;
+  currentMessages=s.messages||[];
+  openChat(s.title);
+  // Re-render messages
+  currentMessages.forEach(m=>_appendMsg(m.role,m.text));
+}
+
+function clearAllData(){
+  if(!confirm('Delete all sessions and settings?'))return;
+  dbClearAll();
+  localStorage.clear();
+  location.reload();
 }
 
 /* ── PWA Install Prompt ── */

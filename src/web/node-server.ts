@@ -89,6 +89,18 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     res.end('[]')
     return true
   }
+  if (url === '/api/ollama-start' && req.method === 'POST') {
+    try {
+      const { execSync } = await import('child_process')
+      execSync('pgrep ollama || nohup ollama serve > /dev/null 2>&1 &', { shell: '/bin/sh' })
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ started: true }))
+    } catch {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ started: false, error: 'Failed to start Ollama' }))
+    }
+    return true
+  }
   if (url === '/api/providers') {
     const available: Record<string, {configured: boolean, defaultModel: string}> = {}
     for (const [name, cfg] of Object.entries(PROVIDER_REGISTRY)) {
