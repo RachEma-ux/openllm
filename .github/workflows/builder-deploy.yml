@@ -312,8 +312,10 @@ jobs:
 
           # Initialize git repo (OpenLLM needs a git context)
           git init
+          git config user.email "deploy@openllm.dev"
+          git config user.name "OpenLLM Deploy"
           echo "# OpenLLM Test Workspace" > README.md
-          git add . && git commit -m "init" --allow-empty
+          git add . && git commit -m "init"
 
           # Copy built dist
           cp -r "$GITHUB_WORKSPACE/dist" .
