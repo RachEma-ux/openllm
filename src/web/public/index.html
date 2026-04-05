@@ -173,6 +173,23 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .setting-dot-green{background:var(--green)}
 .setting-dot-red{background:var(--red)}
 .setting-dot-yellow{background:var(--yellow)}
+.setting-toggle{width:44px;height:24px;border-radius:12px;border:none;background:var(--border);cursor:pointer;position:relative;transition:background .2s}
+.setting-toggle.on{background:var(--accent)}
+.setting-toggle::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .2s}
+.setting-toggle.on::after{transform:translateX(20px)}
+
+/* Collapsible long code */
+.msg-bot pre.collapsed{max-height:150px;overflow:hidden}
+.msg-bot pre.collapsed::after{content:'';position:absolute;bottom:0;left:0;right:0;height:40px;background:linear-gradient(transparent,var(--bg3))}
+.expand-btn{font-size:11px;color:var(--accent);cursor:pointer;text-align:center;padding:4px;border:none;background:none}
+
+/* Voice button */
+.voice-btn{width:44px;height:44px;border-radius:50%;border:2px solid var(--border);background:none;color:var(--dim);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.voice-btn.recording{border-color:var(--red);color:var(--red);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+/* Light theme */
+.light{--bg:#ffffff;--bg2:#f5f5f5;--bg3:#ebebeb;--border:#ddd;--text:#1a1a1a;--dim:#666;--muted:#999}
 
 /* Mobile */
 @media(max-width:700px){
@@ -302,7 +319,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
         <div class="comp-box">
           <textarea id="input" rows="1" placeholder="Ask anything..." oninput="autoResize(this)" onkeydown="handleKey(event)"></textarea>
           <div class="comp-row">
-            <div class="comp-attach">+</div>
+            <div class="comp-attach" onclick="pickFile()">+</div>
+            <button class="voice-btn" id="voice-btn" onclick="toggleVoice()" title="Voice input" style="display:none">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+            </button>
             <button class="comp-send" onclick="send()">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
             </button>
@@ -406,12 +426,31 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
       </div>
 
       <div class="settings-section">
+        <h3>Appearance</h3>
+        <div class="setting-row">
+          <span class="setting-label">Dark Mode</span>
+          <button class="setting-toggle on" id="theme-toggle" onclick="toggleTheme()"></button>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Font Size</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="setting-btn" style="width:36px;padding:6px;background:var(--bg3);color:var(--text)" onclick="changeFontSize(-1)">A-</button>
+            <span class="setting-value" id="font-size-val">14</span>
+            <button class="setting-btn" style="width:36px;padding:6px;background:var(--bg3);color:var(--text)" onclick="changeFontSize(1)">A+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
         <h3>Sessions</h3>
         <div class="setting-row">
           <span class="setting-label">Stored sessions</span>
           <span class="setting-value" id="session-count">0</span>
         </div>
-        <button class="setting-btn setting-btn-danger" onclick="clearAllData()">Clear All Data</button>
+        <div style="display:flex;gap:8px">
+          <button class="setting-btn" style="flex:1;background:var(--bg3);color:var(--text)" onclick="exportSessions()">Export All</button>
+          <button class="setting-btn setting-btn-danger" style="flex:1" onclick="clearAllData()">Clear All</button>
+        </div>
       </div>
 
       <div class="settings-section">
@@ -588,6 +627,7 @@ function renderMd(t){
       pre.appendChild(btn);
     });
     if(typeof Prism!=='undefined')Prism.highlightAllUnder(messagesEl);
+    collapseCodeBlocks();
   },50);
   return html;
 }
@@ -926,6 +966,10 @@ async function loadSavedSessions(){
     const timeStr=ago<60?ago+'m ago':Math.round(ago/60)+'h ago';
     el.innerHTML='<div class="t">'+esc(s.title)+'</div><div class="m">'+timeStr+' · '+s.messages.length+' msgs</div>';
     el.onclick=()=>resumeSession(s);
+    let lp=null;
+    el.addEventListener('touchstart',()=>{lp=setTimeout(()=>deleteSession(s.id),800)},{passive:true});
+    el.addEventListener('touchend',()=>{if(lp)clearTimeout(lp)},{passive:true});
+    el.addEventListener('touchmove',()=>{if(lp)clearTimeout(lp)},{passive:true});
     list.appendChild(el);
   });
 }
@@ -943,6 +987,116 @@ function clearAllData(){
   dbClearAll();
   localStorage.clear();
   location.reload();
+}
+
+/* ── Theme Toggle ── */
+function toggleTheme(){
+  const btn=$('#theme-toggle');
+  const isLight=document.body.classList.toggle('light');
+  btn.classList.toggle('on',!isLight);
+  localStorage.setItem('openllm-theme',isLight?'light':'dark');
+}
+// Restore theme on boot
+if(localStorage.getItem('openllm-theme')==='light'){
+  document.body.classList.add('light');
+  setTimeout(()=>{const b=$('#theme-toggle');if(b)b.classList.remove('on')},0);
+}
+
+/* ── Font Size ── */
+let fontSize=parseInt(localStorage.getItem('openllm-fontsize')||'14');
+function changeFontSize(delta){
+  fontSize=Math.max(10,Math.min(22,fontSize+delta));
+  document.body.style.fontSize=fontSize+'px';
+  localStorage.setItem('openllm-fontsize',''+fontSize);
+  const el=$('#font-size-val');if(el)el.textContent=fontSize;
+}
+document.body.style.fontSize=fontSize+'px';
+
+/* ── Export Sessions ── */
+async function exportSessions(){
+  const sessions=await dbGetSessions();
+  if(!sessions.length){showToast('No sessions to export');return}
+  const data=JSON.stringify(sessions,null,2);
+  const blob=new Blob([data],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='openllm-sessions-'+new Date().toISOString().slice(0,10)+'.json';
+  a.click();URL.revokeObjectURL(url);
+  showToast('Exported '+sessions.length+' sessions');
+}
+
+/* ── Delete Single Session (long press on home card) ── */
+async function deleteSession(id){
+  if(!confirm('Delete this session?'))return;
+  await dbDeleteSession(id);
+  loadSavedSessions();
+  showToast('Session deleted');
+}
+
+/* ── Voice Input ── */
+let recognition=null;
+let isRecording=false;
+
+// Show voice button if SpeechRecognition available
+if(window.SpeechRecognition||window.webkitSpeechRecognition){
+  setTimeout(()=>{const b=$('#voice-btn');if(b)b.style.display='flex'},0);
+}
+
+function toggleVoice(){
+  if(!window.SpeechRecognition&&!window.webkitSpeechRecognition){showToast('Voice not supported');return}
+  const btn=$('#voice-btn');
+  if(isRecording){
+    recognition.stop();
+    return;
+  }
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  recognition=new SR();
+  recognition.lang='en-US';
+  recognition.interimResults=false;
+  recognition.maxAlternatives=1;
+  recognition.onstart=()=>{isRecording=true;btn.classList.add('recording')};
+  recognition.onend=()=>{isRecording=false;btn.classList.remove('recording')};
+  recognition.onresult=(e)=>{
+    const text=e.results[0][0].transcript;
+    inputEl.value+=text;
+    autoResize(inputEl);
+  };
+  recognition.onerror=(e)=>{showToast('Voice error: '+e.error);isRecording=false;btn.classList.remove('recording')};
+  recognition.start();
+}
+
+/* ── File Picker ── */
+function pickFile(){
+  const inp=document.createElement('input');
+  inp.type='file';inp.accept='text/*,.md,.json,.ts,.tsx,.js,.py,.html,.css,.yaml,.yml,.toml,.xml,.csv,.sql';
+  inp.onchange=async()=>{
+    const file=inp.files[0];
+    if(!file)return;
+    if(file.size>100000){showToast('File too large (max 100KB)');return}
+    const text=await file.text();
+    const msg='File: '+file.name+'\n```\n'+text.slice(0,5000)+'\n```';
+    inputEl.value=msg;
+    autoResize(inputEl);
+    showToast('File loaded: '+file.name);
+  };
+  inp.click();
+}
+
+/* ── Collapsible Long Code Blocks ── */
+function collapseCodeBlocks(){
+  document.querySelectorAll('.msg-bot pre:not([data-collapse])').forEach(pre=>{
+    pre.setAttribute('data-collapse','1');
+    if(pre.scrollHeight>200){
+      pre.classList.add('collapsed');
+      const btn=document.createElement('button');
+      btn.className='expand-btn';btn.textContent='Show more';
+      btn.onclick=()=>{
+        if(pre.classList.toggle('collapsed')){btn.textContent='Show more'}
+        else{btn.textContent='Show less'}
+      };
+      pre.parentElement.insertBefore(btn,pre.nextSibling);
+    }
+  });
 }
 
 /* ── PWA Install Prompt ── */
