@@ -5,1760 +5,448 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OpenLLM</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" async></script>
 <style>
-/* ── Reset & Base ───────────────────────────────────────────────── */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0d0d;--bg2:#151515;--bg3:#1c1c1c;--border:#2a2a2a;
+  --text:#e8e8e8;--dim:#888;--muted:#555;--accent:#6366f1;
+  --green:#22c55e;--blue:#3b82f6;--yellow:#f59e0b;--red:#ef4444;
+  --font:-apple-system,'SF Pro Text','Helvetica Neue',sans-serif;
+  --mono:'SF Mono','Fira Code',monospace;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;overflow:hidden}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 
-:root {
-  --bg: #0d0d0d;
-  --bg-elevated: #151515;
-  --bg-code: #1e1e1e;
-  --text: #e8e8e8;
-  --text-dim: #888;
-  --text-muted: #555;
-  --accent: #6366f1;
-  --accent-hover: #818cf8;
-  --border: #2a2a2a;
-  --green: #22c55e;
-  --blue: #3b82f6;
-  --yellow: #f59e0b;
-  --red: #ef4444;
-  --sidebar-w: 56px;
-  --panel-w: 260px;
-  --font: -apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
-  --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
-  --transition: 200ms ease-out;
-}
+/* ── Layout ── */
+#app{display:flex;height:100%}
 
-html, body {
-  height: 100%;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font);
-  font-size: 14px;
-  line-height: 1.5;
-  overflow: hidden;
-  -webkit-font-smoothing: antialiased;
-}
+/* ── Sidebar Rail ── */
+.rail{width:56px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:12px 0;flex-shrink:0}
+.rail-btn{width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:none;border:none;color:var(--dim);border-radius:8px;cursor:pointer;font-size:16px;margin-bottom:4px}
+.rail-btn:hover{background:var(--bg3);color:var(--text)}
+.rail-sep{width:24px;height:1px;background:var(--border);margin:6px 0}
+.rail-spacer{flex:1}
+.proj-av{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;cursor:pointer;margin-bottom:6px;transition:transform .15s}
+.proj-av:hover{transform:scale(1.1)}
+.proj-av.active{outline:2px solid var(--text);outline-offset:2px}
 
-/* ── Scrollbar ──────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #444; }
+/* ── Project Panel ── */
+.panel{width:0;overflow:hidden;background:var(--bg2);border-right:1px solid var(--border);transition:width .2s ease-out;flex-shrink:0}
+.panel.open{width:260px}
+.panel-inner{width:260px;padding:16px;display:flex;flex-direction:column;height:100%}
+.panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.panel-title{font-size:14px;font-weight:600}
+.panel-close{background:none;border:none;color:var(--dim);cursor:pointer;font-size:18px}
+.sess-item{padding:10px 12px;border-radius:8px;cursor:pointer;margin-bottom:2px;font-size:13px;transition:background .15s}
+.sess-item:hover{background:var(--bg3)}
+.sess-item .t{font-weight:500;margin-bottom:2px}
+.sess-item .m{font-size:11px;color:var(--dim)}
+.panel-new{width:100%;margin-top:auto;padding:10px;border-radius:8px;border:1px dashed var(--border);background:none;color:var(--dim);cursor:pointer;font-size:13px}
+.panel-new:hover{border-color:var(--accent);color:var(--text)}
 
-/* ── Layout Shell ───────────────────────────────────────────────── */
-#app {
-  display: flex;
-  height: 100vh;
-  width: 100vw;
-  overflow: hidden;
-}
+/* ── Main ── */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 
-/* ── Sidebar Rail ───────────────────────────────────────────────── */
-#sidebar-rail {
-  width: var(--sidebar-w);
-  min-width: var(--sidebar-w);
-  height: 100%;
-  background: var(--bg);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 0;
-  z-index: 30;
-  transition: transform var(--transition);
-}
+/* ── HOME ── */
+#home{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;overflow-y:auto}
+#home.hide{display:none}
+.hero{text-align:center;margin-bottom:40px}
+.hero-logo{width:64px;height:64px;border-radius:16px;background:var(--accent);display:inline-flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:#fff;margin-bottom:16px}
+.hero h1{font-size:28px;font-weight:700;margin-bottom:6px}
+.hero p{color:var(--dim);font-size:14px}
+.status-row{display:flex;gap:12px;justify-content:center;margin-top:16px}
+.badge{padding:4px 12px;border-radius:99px;font-size:12px;border:1px solid var(--border);color:var(--dim)}
+.home-cards{width:100%;max-width:520px}
+.home-cards-title{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);margin-bottom:12px}
+.hcard{padding:14px 16px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);cursor:pointer;margin-bottom:8px;transition:border-color .15s}
+.hcard:hover{border-color:var(--accent)}
+.hcard .t{font-size:14px;font-weight:500;margin-bottom:4px}
+.hcard .m{font-size:12px;color:var(--dim)}
+.new-btn{width:100%;max-width:520px;margin-top:20px;padding:14px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+.new-btn:hover{background:#818cf8}
 
-.rail-btn {
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  border: none;
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-  font-size: 18px;
-  margin: 2px 0;
-  transition: background 150ms, color 150ms;
-  position: relative;
-}
-.rail-btn:hover { background: #1a1a1a; color: var(--text); }
-.rail-btn.active { background: var(--accent); color: #fff; }
-.rail-btn.active:hover { background: var(--accent-hover); }
+/* ── CHAT ── */
+#chat{flex:1;display:none;flex-direction:column;overflow:hidden}
+#chat.show{display:flex}
 
-.rail-spacer { flex: 1; }
-.rail-divider { width: 28px; height: 1px; background: var(--border); margin: 6px 0; }
+/* Chat app header */
+.chat-hdr{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;border-bottom:1px solid var(--border);flex-shrink:0}
+.chat-back{background:none;border:none;color:var(--dim);cursor:pointer;width:32px;height:32px;display:flex;flex-direction:column;justify-content:center;gap:4px;padding:4px}
+.chat-back span{display:block;height:2px;background:var(--dim);border-radius:2px;width:20px}
+.chat-icons{display:flex;gap:8px}
+.chat-icon{width:32px;height:32px;display:flex;align-items:center;justify-content:center;color:var(--dim);position:relative}
+.green-dot{position:absolute;top:5px;right:5px;width:6px;height:6px;background:var(--green);border-radius:50%}
 
-.rail-logo {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 11px;
-  color: #fff;
-  background: var(--accent);
-  margin-bottom: 4px;
-  letter-spacing: -0.5px;
-}
+/* Tabs */
+.tabs{display:flex;flex-shrink:0}
+.tab{flex:1;text-align:center;padding:10px 0;font-size:15px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
+.tab.on{color:var(--text);border-bottom-color:var(--text);font-weight:600}
 
-.project-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--text);
-  background: #1e1e1e;
-  border: 1px solid var(--border);
-  cursor: pointer;
-  transition: border-color 150ms, background 150ms;
-}
-.project-avatar:hover { border-color: var(--accent); background: #1a1a2e; }
-.project-avatar.active { border-color: var(--accent); background: var(--accent); color: #fff; }
+/* Session pane */
+.sess-pane{flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:12px}
+.sess-title-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.sess-title-text{font-size:15px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--dim);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 
-/* ── Project Panel (slide-in) ───────────────────────────────────── */
-#project-panel {
-  width: 0;
-  overflow: hidden;
-  height: 100%;
-  background: var(--bg);
-  border-right: 1px solid var(--border);
-  transition: width var(--transition);
-  flex-shrink: 0;
-  z-index: 20;
-}
-#project-panel.open { width: var(--panel-w); }
+/* Messages */
+.msg{max-width:85%;animation:fadein .15s ease-out}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.msg-user{align-self:flex-end;background:var(--accent);color:#fff;padding:10px 14px;border-radius:14px 14px 4px 14px;font-size:14px}
+.msg-bot{align-self:flex-start;font-size:14px;line-height:1.65}
+.msg-bot code{font-family:var(--mono);font-size:12px;background:var(--bg3);padding:2px 5px;border-radius:4px}
+.msg-bot pre{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;margin:8px 0}
+.msg-bot pre code{background:none;padding:0}
 
-#project-panel-inner {
-  width: var(--panel-w);
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  padding: 16px;
-}
+/* Tool card */
+.tcard{align-self:flex-start;max-width:85%;background:var(--bg2);border-radius:8px;border-left:3px solid var(--green);overflow:hidden}
+.tcard-hdr{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer}
+.tcard-name{font-size:12px;font-weight:600;flex:1}
+.tcard-st{font-size:11px;color:var(--dim)}
+.tcard-body{display:none;padding:0 12px 10px;font-family:var(--mono);font-size:12px;color:var(--dim);white-space:pre-wrap;max-height:200px;overflow-y:auto}
+.tcard.open .tcard-body{display:block}
 
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-.panel-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.panel-close {
-  width: 28px; height: 28px;
-  border: none; background: transparent;
-  color: var(--text-dim); cursor: pointer;
-  border-radius: 4px; font-size: 16px;
-  display: flex; align-items: center; justify-content: center;
-}
-.panel-close:hover { background: #1a1a1a; color: var(--text); }
+/* Permission card */
+.pcard{align-self:flex-start;max-width:85%;background:#1a1a2e;border-radius:8px;border-left:3px solid var(--yellow);padding:12px 14px}
+.pcard-title{font-size:13px;font-weight:600;color:var(--yellow);margin-bottom:6px}
+.pcard-desc{font-size:12px;color:var(--dim);margin-bottom:10px;font-family:var(--mono)}
+.pcard-btns{display:flex;gap:8px}
+.pbtn{padding:6px 16px;border-radius:6px;border:none;font-size:12px;font-weight:600;cursor:pointer}
+.pbtn-ok{background:var(--green);color:#fff}
+.pbtn-no{background:#2a1a1a;color:var(--red);border:1px solid #3a2020}
 
-.session-list { flex: 1; overflow-y: auto; }
+/* Changes pane */
+.changes-pane{flex:1;display:none;overflow-y:auto;padding:40px 14px;text-align:center;color:var(--muted);font-size:14px}
 
-.session-item {
-  padding: 10px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  margin-bottom: 4px;
-  transition: background 150ms;
-}
-.session-item:hover { background: #1a1a1a; }
-.session-item.active { background: var(--accent); }
-.session-item.active .session-meta { color: rgba(255,255,255,0.7); }
+/* Composer */
+.composer{flex-shrink:0;background:var(--bg);padding:8px 12px 10px;border-top:1px solid var(--border)}
+.comp-box{background:#1a1a1a;border:1px solid var(--border);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
+.comp-box textarea{background:none;border:none;outline:none;color:var(--text);font-size:15px;resize:none;width:100%;font-family:inherit;line-height:1.4;min-height:22px;max-height:120px}
+.comp-row{display:flex;justify-content:space-between;align-items:center}
+.comp-attach{width:28px;height:28px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:20px;cursor:pointer}
+.comp-send{width:34px;height:34px;background:var(--dim);border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;border:none}
+.comp-send:hover{background:var(--text)}
+.toolbar{display:flex;align-items:center;padding:0 2px}
+.tool-item{padding:4px 8px;font-size:13px;color:var(--dim);border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:4px}
+.tool-item:hover{background:#1a1a1a}
+.tool-sep{color:var(--border);font-size:16px;padding:0 2px}
+.model-badge{width:14px;height:14px;background:#e8d5b0;border-radius:3px;display:inline-flex;align-items:center;justify-content:center;font-size:8px;color:#5a3e00;font-weight:900}
+.tool-shield{margin-left:auto;color:var(--muted);padding:4px 8px;cursor:pointer}
+.tok-count{font-size:11px;color:var(--muted);margin-left:auto}
 
-.session-title {
-  font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-bottom: 2px;
-}
-.session-meta { font-size: 11px; color: var(--text-dim); }
+/* Toast */
+.toast{position:fixed;bottom:20px;right:20px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:13px;color:var(--text);z-index:999;animation:fadein .2s}
 
-.panel-new-btn {
-  margin-top: 12px;
-  padding: 10px;
-  border-radius: 8px;
-  border: 1px dashed var(--border);
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-  font-size: 13px;
-  width: 100%;
-  transition: border-color 150ms, color 150ms;
-}
-.panel-new-btn:hover { border-color: var(--accent); color: var(--accent); }
-
-/* ── Main Content ───────────────────────────────────────────────── */
-#main-content {
-  flex: 1;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  min-width: 0;
-}
-
-/* ── HOME VIEW ──────────────────────────────────────────────────── */
-#home-view {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
-  overflow-y: auto;
-}
-#home-view.hidden { display: none; }
-
-.home-hero {
-  text-align: center;
-  margin-bottom: 40px;
-}
-.home-logo {
-  width: 64px;
-  height: 64px;
-  border-radius: 16px;
-  background: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  font-weight: 700;
-  color: #fff;
-  margin: 0 auto 16px;
-  letter-spacing: -0.5px;
-}
-.home-title {
-  font-size: 28px;
-  font-weight: 700;
-  margin-bottom: 8px;
-}
-.home-subtitle {
-  font-size: 14px;
-  color: var(--text-dim);
-  margin-bottom: 12px;
-}
-
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border-radius: 99px;
-  background: #0a1a0a;
-  border: 1px solid #1a3a1a;
-  font-size: 12px;
-  color: var(--green);
-}
-.status-dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--green);
-  animation: pulse 2s infinite;
-}
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-.provider-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border-radius: 99px;
-  background: #1a1a2e;
-  border: 1px solid #2a2a4e;
-  font-size: 12px;
-  color: var(--accent);
-  margin-top: 8px;
-}
-
-.home-sessions {
-  width: 100%;
-  max-width: 520px;
-}
-.home-sessions-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-.home-sessions-title {
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-dim);
-}
-
-.home-session-card {
-  padding: 14px 16px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  cursor: pointer;
-  margin-bottom: 8px;
-  transition: border-color 150ms, background 150ms;
-}
-.home-session-card:hover { border-color: var(--accent); background: #1a1a2e; }
-.home-session-card-title {
-  font-size: 14px;
-  font-weight: 500;
-  margin-bottom: 4px;
-}
-.home-session-card-meta {
-  font-size: 12px;
-  color: var(--text-dim);
-  display: flex;
-  gap: 12px;
-}
-
-.new-session-btn {
-  width: 100%;
-  max-width: 520px;
-  margin-top: 20px;
-  padding: 14px;
-  border-radius: 10px;
-  border: none;
-  background: var(--accent);
-  color: #fff;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 150ms;
-}
-.new-session-btn:hover { background: var(--accent-hover); }
-
-/* ── CHAT VIEW ──────────────────────────────────────────────────── */
-#chat-view {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-#chat-view.hidden { display: none; }
-
-/* App Header (hamburger + icons) */
-.chat-app-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.chat-hamburger {
-  width: 32px; height: 32px;
-  display: flex; flex-direction: column; justify-content: center;
-  gap: 4px; padding: 4px; cursor: pointer; background: none; border: none;
-}
-.chat-hamburger span {
-  display: block; height: 2px; background: var(--text-dim);
-  border-radius: 2px; width: 20px;
-}
-.chat-header-actions {
-  display: flex; align-items: center; gap: 8px;
-}
-.chat-header-icon {
-  width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
-  color: var(--text-dim); border-radius: 6px; position: relative; cursor: pointer;
-}
-.chat-header-icon .status-dot-green {
-  position: absolute; top: 6px; right: 6px; width: 6px; height: 6px;
-  background: var(--green); border-radius: 50%;
-}
-
-/* Tab Bar (Session / Changes) */
-.chat-tab-bar { display: flex; flex-shrink: 0; }
-.chat-tab {
-  flex: 1; text-align: center; padding: 10px 0; font-size: 15px;
-  font-weight: 500; color: var(--text-muted); cursor: pointer;
-  border-bottom: 2px solid transparent; transition: all 0.15s;
-}
-.chat-tab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
-
-/* Session title row */
-.session-title-row {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 10px; margin-bottom: 14px;
-}
-.session-title-text {
-  flex: 1; font-size: 15px; font-weight: 600;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.session-title-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-.session-spinner {
-  width: 16px; height: 16px; border: 2px solid var(--border);
-  border-top-color: var(--text-dim); border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-.session-dots { color: var(--text-dim); font-size: 18px; letter-spacing: 1px; cursor: pointer; }
-
-/* Task items */
-.task-item { display: flex; gap: 12px; padding: 7px 0; align-items: flex-start; }
-.task-num { font-size: 14px; color: var(--text-muted); min-width: 20px; text-align: right; padding-top: 1px; flex-shrink: 0; }
-.task-label { font-size: 14px; line-height: 1.5; }
-.badge-p1 { font-weight: 700; color: var(--text); }
-.badge-p2 { font-weight: 700; color: var(--text-dim); }
-
-/* Clear button */
-.clear-btn {
-  background: #1c1c1c; border: 1px solid var(--border); color: var(--text);
-  font-size: 14px; padding: 10px 18px; border-radius: 8px; cursor: pointer;
-  transition: background 150ms;
-}
-.clear-btn:hover { background: #252525; }
-
-/* Changes tab content */
-.changes-content { padding: 16px 14px; color: var(--text-dim); font-size: 14px; }
-
-/* Composer (OpenCode style) */
-.chat-composer {
-  flex-shrink: 0; background: var(--bg); padding: 8px 12px 12px;
-  border-top: 1px solid var(--border);
-}
-.composer-box {
-  background: #1a1a1a; border: 1px solid var(--border); border-radius: 14px;
-  padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;
-}
-.composer-box textarea {
-  background: none; border: none; outline: none; color: var(--text);
-  font-size: 15px; resize: none; width: 100%; font-family: inherit;
-  line-height: 1.4; min-height: 22px; caret-color: var(--text);
-}
-.composer-row {
-  display: flex; justify-content: space-between; align-items: center;
-}
-.composer-attach {
-  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
-  color: var(--text-dim); font-size: 20px; font-weight: 300; cursor: pointer;
-}
-.composer-send {
-  width: 34px; height: 34px; background: var(--text-dim); border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; border: none; transition: background 0.15s;
-}
-.composer-send:hover { background: var(--text); }
-.composer-send svg { stroke: white; }
-
-/* Bottom toolbar (Plan | Model | Mode | Shield) */
-.bottom-toolbar {
-  display: flex; align-items: center; padding: 0 2px;
-}
-.toolbar-item {
-  padding: 4px 8px; font-size: 13px; color: var(--text-dim);
-  border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 4px;
-}
-.toolbar-item:hover { background: #1a1a1a; }
-.toolbar-sep { color: var(--border); font-size: 16px; padding: 0 2px; }
-.model-badge {
-  width: 14px; height: 14px; background: #e8d5b0; border-radius: 3px;
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: 8px; color: #5a3e00; font-weight: 900;
-}
-.toolbar-shield { margin-left: auto; color: var(--text-muted); padding: 4px 8px; cursor: pointer; }
-
-/* Messages area */
-#messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* Message bubbles */
-.msg {
-  max-width: 85%;
-  animation: msg-in 150ms ease-out;
-}
-@keyframes msg-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.msg-user {
-  align-self: flex-end;
-  background: var(--accent);
-  color: #fff;
-  padding: 10px 14px;
-  border-radius: 14px 14px 4px 14px;
-  font-size: 14px;
-}
-
-.msg-assistant {
-  align-self: flex-start;
-  background: transparent;
-  padding: 4px 0;
-  font-size: 14px;
-  line-height: 1.65;
-}
-
-/* Markdown inside assistant messages */
-.msg-assistant h1, .msg-assistant h2, .msg-assistant h3 {
-  font-weight: 700;
-  margin: 12px 0 6px;
-}
-.msg-assistant h1 { font-size: 20px; }
-.msg-assistant h2 { font-size: 17px; }
-.msg-assistant h3 { font-size: 15px; }
-.msg-assistant p { margin: 4px 0; }
-.msg-assistant ul, .msg-assistant ol { padding-left: 20px; margin: 4px 0; }
-.msg-assistant strong { font-weight: 700; }
-.msg-assistant em { font-style: italic; }
-
-.msg-assistant code {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  background: var(--bg-code);
-  padding: 2px 5px;
-  border-radius: 4px;
-}
-.msg-assistant pre {
-  background: var(--bg-code);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
-  overflow-x: auto;
-  margin: 8px 0;
-}
-.msg-assistant pre code {
-  background: transparent;
-  padding: 0;
-  font-size: 12.5px;
-  line-height: 1.55;
-}
-
-/* Tool cards */
-.tool-card {
-  align-self: flex-start;
-  max-width: 85%;
-  background: var(--bg-elevated);
-  border-radius: 8px;
-  border-left: 3px solid var(--green);
-  margin: 4px 0;
-  overflow: hidden;
-  animation: msg-in 150ms ease-out;
-}
-.tool-card.tool-file { border-left-color: var(--blue); }
-.tool-card.tool-web { border-left-color: var(--yellow); }
-.tool-card.tool-error { border-left-color: var(--red); }
-
-.tool-card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  cursor: pointer;
-  user-select: none;
-}
-.tool-card-icon {
-  font-size: 14px;
-  width: 20px;
-  text-align: center;
-}
-.tool-card-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
-  flex: 1;
-}
-.tool-card-status {
-  font-size: 11px;
-  color: var(--text-dim);
-}
-.tool-card-chevron {
-  font-size: 12px;
-  color: var(--text-muted);
-  transition: transform 150ms;
-}
-.tool-card.open .tool-card-chevron { transform: rotate(90deg); }
-
-.tool-card-body {
-  display: none;
-  padding: 0 12px 10px;
-  max-height: 300px;
-  overflow-y: auto;
-}
-.tool-card.open .tool-card-body { display: block; }
-
-.tool-output {
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-dim);
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-.tool-input-label {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-/* Permission cards */
-.perm-card {
-  align-self: flex-start;
-  max-width: 85%;
-  background: #1a1a2e;
-  border-radius: 8px;
-  border-left: 3px solid var(--yellow);
-  padding: 12px 14px;
-  margin: 4px 0;
-  animation: msg-in 150ms ease-out;
-}
-.perm-card-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--yellow);
-  margin-bottom: 6px;
-}
-.perm-card-desc {
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-bottom: 10px;
-  font-family: var(--mono);
-  word-break: break-all;
-}
-.perm-card-actions {
-  display: flex;
-  gap: 8px;
-}
-.perm-btn {
-  padding: 6px 16px;
-  border-radius: 6px;
-  border: none;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 150ms;
-}
-.perm-btn-allow {
-  background: var(--green);
-  color: #fff;
-}
-.perm-btn-allow:hover { background: #16a34a; }
-.perm-btn-deny {
-  background: #2a1a1a;
-  color: var(--red);
-  border: 1px solid #3a2020;
-}
-.perm-btn-deny:hover { background: #3a2020; }
-.perm-resolved {
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 0;
-}
-.perm-resolved.allowed { color: var(--green); }
-.perm-resolved.denied { color: var(--red); }
-
-/* Streaming cursor */
-.streaming-cursor::after {
-  content: '';
-  display: inline-block;
-  width: 7px;
-  height: 16px;
-  background: var(--accent);
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  animation: blink 0.8s step-end infinite;
-}
-@keyframes blink {
-  50% { opacity: 0; }
-}
-
-/* Typing indicator */
-.typing-indicator {
-  align-self: flex-start;
-  display: flex;
-  gap: 4px;
-  padding: 10px 14px;
-  animation: msg-in 150ms ease-out;
-}
-.typing-indicator span {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  animation: typing-bounce 1.2s infinite;
-}
-.typing-indicator span:nth-child(2) { animation-delay: 0.15s; }
-.typing-indicator span:nth-child(3) { animation-delay: 0.3s; }
-@keyframes typing-bounce {
-  0%, 60%, 100% { transform: translateY(0); }
-  30% { transform: translateY(-4px); }
-}
-
-/* ── Composer ───────────────────────────────────────────────────── */
-/* Old composer overridden by .chat-composer / .composer-box above */
-
-#msg-input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  color: var(--text);
-  font-family: var(--font);
-  font-size: 15px;
-  line-height: 1.4;
-  resize: none;
-  outline: none;
-  max-height: 160px;
-  min-height: 22px;
-  overflow-y: auto;
-  width: 100%;
-  caret-color: var(--text);
-}
-#msg-input::placeholder { color: var(--text-muted); }
-
-#send-btn.cancel-mode .composer-send { background: var(--red); }
-
-.token-count {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-left: auto;
-}
-
-/* ── Error Toast ────────────────────────────────────────────────── */
-#toast-container {
-  position: fixed;
-  bottom: 80px;
-  right: 20px;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.toast {
-  padding: 10px 16px;
-  border-radius: 8px;
-  background: #1a1010;
-  border: 1px solid #3a2020;
-  color: var(--red);
-  font-size: 13px;
-  max-width: 360px;
-  animation: toast-in 200ms ease-out;
-}
-@keyframes toast-in {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* ── Mobile Overlay ─────────────────────────────────────────────── */
-#mobile-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.6);
-  z-index: 25;
-}
-#mobile-overlay.visible { display: block; }
-
-/* ── Responsive ─────────────────────────────────────────────────── */
-@media (max-width: 640px) {
-  #sidebar-rail {
-    position: fixed;
-    left: 0;
-    top: 0;
-    transform: translateX(-100%);
-    z-index: 35;
-  }
-  #sidebar-rail.mobile-open {
-    transform: translateX(0);
-  }
-  #project-panel {
-    position: fixed;
-    left: var(--sidebar-w);
-    top: 0;
-    z-index: 32;
-    height: 100%;
-    background: var(--bg);
-  }
-  .mobile-hamburger {
-    display: flex !important;
-  }
-  .msg { max-width: 95%; }
-}
-@media (min-width: 641px) {
-  .mobile-hamburger { display: none !important; }
-}
-
-.mobile-hamburger {
-  position: fixed;
-  top: 8px;
-  left: 8px;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text);
-  cursor: pointer;
-  z-index: 20;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-}
+/* Mobile */
+@media(max-width:700px){.rail{display:none}.panel{display:none}}
 </style>
 </head>
 <body>
-
-<!-- Mobile hamburger -->
-<button class="mobile-hamburger" id="hamburger-btn" aria-label="Menu">&#9776;</button>
-
-<!-- Mobile overlay -->
-<div id="mobile-overlay"></div>
-
 <div id="app">
-
   <!-- Sidebar Rail -->
-  <nav id="sidebar-rail">
-    <button class="rail-btn" id="rail-menu-btn" title="Menu">&#9776;</button>
-    <div class="rail-divider"></div>
-    <div class="rail-logo" title="OpenLLM">OL</div>
-    <div class="rail-divider"></div>
-    <div id="project-avatars"></div>
-    <button class="rail-btn" id="rail-add-btn" title="New project">+</button>
+  <div class="rail">
+    <button class="rail-btn" title="Menu" onclick="togglePanel()">&#9776;</button>
+    <div class="rail-sep"></div>
+    <div class="rail-btn" style="font-weight:800;color:var(--accent)">OL</div>
+    <div class="rail-sep"></div>
+    <div id="avatars"></div>
+    <button class="rail-btn" title="Add project" onclick="addProject()">+</button>
     <div class="rail-spacer"></div>
-    <div class="rail-divider"></div>
-    <button class="rail-btn" id="rail-settings-btn" title="Settings">&#9881;</button>
-    <button class="rail-btn" id="rail-help-btn" title="Help">?</button>
-  </nav>
+    <div class="rail-sep"></div>
+    <button class="rail-btn" title="Settings">&#9881;</button>
+    <button class="rail-btn" title="Help">?</button>
+  </div>
 
   <!-- Project Panel -->
-  <aside id="project-panel">
-    <div id="project-panel-inner">
-      <div class="panel-header">
-        <span class="panel-title" id="panel-project-name">Project</span>
-        <button class="panel-close" id="panel-close-btn">&times;</button>
+  <div class="panel" id="panel">
+    <div class="panel-inner">
+      <div class="panel-head">
+        <span class="panel-title" id="panel-name">Project</span>
+        <button class="panel-close" onclick="closePanel()">&times;</button>
       </div>
-      <div class="session-list" id="session-list"></div>
-      <button class="panel-new-btn" id="panel-new-session-btn">+ New Session</button>
+      <div id="panel-sessions"></div>
+      <button class="panel-new" onclick="newSession()">+ New Session</button>
     </div>
-  </aside>
+  </div>
 
   <!-- Main Content -->
-  <main id="main-content">
-
+  <div class="main">
     <!-- HOME VIEW -->
-    <div id="home-view">
-      <div class="home-hero">
-        <div class="home-logo">OL</div>
-        <h1 class="home-title">OpenLLM</h1>
-        <p class="home-subtitle">Local-first LLM development platform</p>
-        <div class="status-badge">
-          <span class="status-dot"></span>
-          <span id="status-text">Connecting...</span>
-        </div>
-        <div class="provider-badge" id="provider-badge">
-          <span>&#9679;</span>
-          <span id="provider-text">No provider</span>
+    <div id="home">
+      <div class="hero">
+        <div class="hero-logo">OL</div>
+        <h1>OpenLLM</h1>
+        <p>Local-first LLM development platform</p>
+        <div class="status-row">
+          <span class="badge" id="status-badge">&#9679; Offline</span>
+          <span class="badge" id="provider-badge">&#9679; No provider</span>
         </div>
       </div>
-      <div class="home-sessions">
-        <div class="home-sessions-header">
-          <span class="home-sessions-title">Recent Sessions</span>
-        </div>
-        <div id="home-session-list"></div>
+      <div class="home-cards">
+        <div class="home-cards-title">Recent Sessions</div>
+        <div id="home-list"></div>
       </div>
-      <button class="new-session-btn" id="home-new-session-btn">New Session</button>
+      <button class="new-btn" onclick="newSession()">New Session</button>
     </div>
 
-    <!-- CHAT VIEW (OpenCode Chat template) -->
-    <div id="chat-view" class="hidden">
-
+    <!-- CHAT VIEW -->
+    <div id="chat">
       <!-- App Header -->
-      <div class="chat-app-header">
-        <button class="chat-hamburger" id="chat-back-btn" title="Back">
+      <div class="chat-hdr">
+        <button class="chat-back" onclick="goHome()" title="Back">
           <span></span><span></span><span></span>
         </button>
-        <div class="chat-header-actions">
-          <div class="chat-header-icon" title="Grid">
+        <div class="chat-icons">
+          <div class="chat-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-            <span class="status-dot-green"></span>
+            <span class="green-dot"></span>
           </div>
-          <div class="chat-header-icon" title="Terminal">
+          <div class="chat-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
           </div>
         </div>
       </div>
 
-      <!-- Tab Bar -->
-      <div class="chat-tab-bar">
-        <div class="chat-tab active" data-tab="session" id="tab-session">Session</div>
-        <div class="chat-tab" data-tab="changes" id="tab-changes">Changes</div>
+      <!-- Tab Bar (Session / Changes) -->
+      <div class="tabs">
+        <div class="tab on" onclick="switchTab('session',this)">Session</div>
+        <div class="tab" onclick="switchTab('changes',this)">Changes</div>
       </div>
 
-      <!-- Session Tab Content -->
-      <div id="session-tab-content" style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
-        <!-- Session title + spinner -->
-        <div style="padding: 16px 14px 0;">
-          <div class="session-title-row">
-            <span class="session-title-text" id="chat-title">New Session</span>
-            <div class="session-title-actions">
-              <div class="session-spinner" id="chat-spinner" style="display:none;"></div>
-              <span class="session-dots">···</span>
-            </div>
+      <!-- Session Tab -->
+      <div class="sess-pane" id="sess-pane">
+        <div class="sess-title-row">
+          <span class="sess-title-text" id="chat-title">New Session</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="spinner" id="chat-spin" style="display:none"></div>
+            <span style="color:var(--dim);font-size:18px;cursor:pointer">···</span>
           </div>
         </div>
-        <!-- Messages -->
-        <div id="messages"></div>
+        <div id="messages" style="display:flex;flex-direction:column;gap:12px"></div>
       </div>
 
-      <!-- Changes Tab Content -->
-      <div id="changes-tab-content" class="changes-content" style="flex:1; display:none; overflow-y:auto;">
-        <p style="color:var(--text-muted); padding: 40px 0; text-align:center;">No changes in this session yet.</p>
-      </div>
+      <!-- Changes Tab -->
+      <div class="changes-pane" id="changes-pane">No changes in this session yet.</div>
 
-      <!-- Composer (OpenCode style) -->
-      <div class="chat-composer">
-        <div class="composer-box">
-          <textarea id="msg-input" rows="1" placeholder="Ask anything..."></textarea>
-          <div class="composer-row">
-            <div class="composer-attach" title="Attach">+</div>
-            <button class="composer-send" id="send-btn" title="Send">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5">
-                <line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>
-              </svg>
+      <!-- Composer -->
+      <div class="composer">
+        <div class="comp-box">
+          <textarea id="input" rows="1" placeholder="Ask anything..." oninput="autoResize(this)" onkeydown="handleKey(event)"></textarea>
+          <div class="comp-row">
+            <div class="comp-attach">+</div>
+            <button class="comp-send" onclick="send()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
             </button>
           </div>
         </div>
-        <div class="bottom-toolbar">
-          <div class="toolbar-item">Plan <span style="font-size:10px;opacity:0.6">&#9662;</span></div>
-          <span class="toolbar-sep">|</span>
-          <div class="toolbar-item">
-            <span class="model-badge">O</span>
-            <span id="toolbar-model">Default</span>
-            <span style="font-size:10px;opacity:0.6">&#9662;</span>
-          </div>
-          <span class="toolbar-sep">|</span>
-          <div class="toolbar-item">Code <span style="font-size:10px;opacity:0.6">&#9662;</span></div>
-          <span class="token-count" id="token-count"></span>
-          <div class="toolbar-shield" title="Permissions">
+        <div class="toolbar">
+          <div class="tool-item">Plan <span style="font-size:10px;opacity:.6">&#9662;</span></div>
+          <span class="tool-sep">|</span>
+          <div class="tool-item"><span class="model-badge">O</span> Default <span style="font-size:10px;opacity:.6">&#9662;</span></div>
+          <span class="tool-sep">|</span>
+          <div class="tool-item">Code <span style="font-size:10px;opacity:.6">&#9662;</span></div>
+          <span class="tok-count" id="tok"></span>
+          <div class="tool-shield">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
         </div>
       </div>
     </div>
-
-  </main>
+  </div>
 </div>
 
-<!-- Toast container -->
-<div id="toast-container"></div>
-
 <script>
-/* ================================================================
-   OpenLLM Web UI — Single-Page Application
-   ================================================================ */
-(function() {
-  'use strict';
+/* ── State ── */
+const projects = [
+  {id:'p1',name:'MyApp',short:'MA',color:'#6b1f4a',sessions:[
+    {id:'s1',title:'Fix auth middleware',time:'2 min ago',msgs:3},
+    {id:'s2',title:'Add user dashboard',time:'1 hour ago',msgs:12},
+    {id:'s3',title:'Refactor DB schema',time:'3 hours ago',msgs:8},
+  ]},
+  {id:'p2',name:'API Server',short:'AS',color:'#1a5f4a',sessions:[
+    {id:'s4',title:'Setup Express routes',time:'30 min ago',msgs:5},
+    {id:'s5',title:'Rate limiting',time:'2 days ago',msgs:20},
+  ]},
+];
+let activeProj = null;
+let view = 'home'; // 'home' | 'chat'
+let ws = null;
+let streaming = false;
+let streamBuf = '';
 
-  // ── State ────────────────────────────────────────────────────────
-  const state = {
-    ws: null,
-    connected: false,
-    currentView: 'home',  // 'home' | 'chat'
-    projects: [],
-    activeProjectId: null,
-    sessions: {},          // projectId -> [session]
-    activeSessionId: null,
-    messages: [],          // current session messages
-    streaming: false,
-    streamBuffer: '',
-    currentToolCards: {},  // id -> element
-    permCallbacks: {},     // id -> { allow, deny }
-    reconnectTimer: null,
-    reconnectDelay: 1000,
-  };
+/* ── DOM ── */
+const $=s=>document.querySelector(s);
+const homeEl=$('#home'), chatEl=$('#chat');
+const avatarsEl=$('#avatars'), panelEl=$('#panel');
+const panelName=$('#panel-name'), panelSessions=$('#panel-sessions');
+const homeList=$('#home-list');
+const chatTitle=$('#chat-title'), chatSpin=$('#chat-spin');
+const sessPaneEl=$('#sess-pane'), changesPaneEl=$('#changes-pane');
+const messagesEl=$('#messages'), inputEl=$('#input'), tokEl=$('#tok');
 
-  // ── DOM References ───────────────────────────────────────────────
-  const $ = (sel) => document.querySelector(sel);
-  const $$ = (sel) => document.querySelectorAll(sel);
+/* ── Render Avatars ── */
+function renderAvatars(){
+  avatarsEl.innerHTML='';
+  projects.forEach(p=>{
+    const d=document.createElement('div');
+    d.className='proj-av'+(activeProj===p.id?' active':'');
+    d.textContent=p.short;
+    d.style.background=p.color;
+    d.title=p.name;
+    d.onclick=()=>togglePanel(p.id);
+    avatarsEl.appendChild(d);
+  });
+}
 
-  const dom = {
-    app: $('#app'),
-    sidebarRail: $('#sidebar-rail'),
-    projectAvatars: $('#project-avatars'),
-    projectPanel: $('#project-panel'),
-    panelProjectName: $('#panel-project-name'),
-    panelCloseBtn: $('#panel-close-btn'),
-    sessionList: $('#session-list'),
-    panelNewSessionBtn: $('#panel-new-session-btn'),
-    homeView: $('#home-view'),
-    chatView: $('#chat-view'),
-    statusText: $('#status-text'),
-    providerText: $('#provider-text'),
-    homeSessionList: $('#home-session-list'),
-    homeNewSessionBtn: $('#home-new-session-btn'),
-    messages: $('#messages'),
-    chatTitle: $('#chat-title'),
-    chatSpinner: $('#chat-spinner'),
-    chatBackBtn: $('#chat-back-btn'),
-    tabSession: $('#tab-session'),
-    tabChanges: $('#tab-changes'),
-    sessionTabContent: $('#session-tab-content'),
-    changesTabContent: $('#changes-tab-content'),
-    toolbarModel: $('#toolbar-model'),
-    msgInput: $('#msg-input'),
-    sendBtn: $('#send-btn'),
-    tokenCount: $('#token-count'),
-    toastContainer: $('#toast-container'),
-    // hamburgerBtn removed — railMenuBtn used instead
-    mobileOverlay: $('#mobile-overlay'),
-    railMenuBtn: $('#rail-menu-btn'),
-    railAddBtn: $('#rail-add-btn'),
-    railSettingsBtn: $('#rail-settings-btn'),
-    railHelpBtn: $('#rail-help-btn'),
-  };
-
-  // ── Initialize Markdown Parser ───────────────────────────────────
-  if (typeof marked !== 'undefined') {
-    marked.setOptions({
-      breaks: true,
-      gfm: true,
-      headerIds: false,
-      mangle: false,
-    });
+/* ── Panel ── */
+function togglePanel(pid){
+  if(activeProj===pid && panelEl.classList.contains('open')){
+    closePanel(); return;
   }
+  activeProj=pid||projects[0]?.id;
+  const p=projects.find(x=>x.id===activeProj);
+  if(!p)return;
+  panelName.textContent=p.name;
+  panelSessions.innerHTML='';
+  p.sessions.forEach(s=>{
+    const el=document.createElement('div');
+    el.className='sess-item';
+    el.innerHTML=`<div class="t">${esc(s.title)}</div><div class="m">${s.time} · ${s.msgs} msgs</div>`;
+    el.onclick=()=>{openChat(s.title);closePanel()};
+    panelSessions.appendChild(el);
+  });
+  panelEl.classList.add('open');
+  renderAvatars();
+}
+function closePanel(){activeProj=null;panelEl.classList.remove('open');renderAvatars()}
 
-  function renderMarkdown(text) {
-    if (typeof marked !== 'undefined') {
-      try { return marked.parse(text); }
-      catch (e) { /* fallback */ }
-    }
-    return escapeHtml(text).replace(/\n/g, '<br>');
-  }
+/* ── Home List ── */
+function renderHome(){
+  homeList.innerHTML='';
+  const all=[];
+  projects.forEach(p=>p.sessions.forEach(s=>all.push({...s,proj:p.name})));
+  all.slice(0,6).forEach(s=>{
+    const el=document.createElement('div');
+    el.className='hcard';
+    el.innerHTML=`<div class="t">${esc(s.title)}</div><div class="m"><span>${esc(s.proj)}</span> · ${s.time} · ${s.msgs} msgs</div>`;
+    el.onclick=()=>openChat(s.title);
+    homeList.appendChild(el);
+  });
+}
 
-  function escapeHtml(str) {
-    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-    return str.replace(/[&<>"']/g, c => map[c]);
-  }
+/* ── View Switching ── */
+function openChat(title){
+  view='chat';
+  homeEl.classList.add('hide');
+  chatEl.classList.add('show');
+  chatTitle.textContent=title||'New Session';
+  messagesEl.innerHTML='';
+  streamBuf='';streaming=false;
+  inputEl.focus();
+}
+function goHome(){
+  view='home';
+  chatEl.classList.remove('show');
+  homeEl.classList.remove('hide');
+}
+function newSession(){openChat('New Session')}
 
-  // ── Demo Data ────────────────────────────────────────────────────
-  function initDemoData() {
-    state.projects = [
-      { id: 'p1', name: 'MyApp', short: 'MA' },
-      { id: 'p2', name: 'API Server', short: 'AS' },
-    ];
-    state.sessions = {
-      p1: [
-        { id: 's1', title: 'Fix auth middleware', time: '2 min ago', messages: 3 },
-        { id: 's2', title: 'Add user dashboard', time: '1 hour ago', messages: 12 },
-        { id: 's3', title: 'Refactor DB schema', time: '3 hours ago', messages: 8 },
-      ],
-      p2: [
-        { id: 's4', title: 'Setup Express routes', time: '30 min ago', messages: 5 },
-        { id: 's5', title: 'Rate limiting', time: '2 days ago', messages: 20 },
-      ],
+/* ── Tabs ── */
+function switchTab(name,el){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  el.classList.add('on');
+  if(name==='session'){sessPaneEl.style.display='flex';changesPaneEl.style.display='none'}
+  else{sessPaneEl.style.display='none';changesPaneEl.style.display='block'}
+}
+
+/* ── Composer ── */
+function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,120)+'px'}
+function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}
+function send(){
+  const txt=inputEl.value.trim();
+  if(!txt)return;
+  appendMsg('user',txt);
+  inputEl.value='';inputEl.style.height='auto';
+  if(ws&&ws.readyState===1){ws.send(JSON.stringify({type:'message',content:txt}))}
+  else{setTimeout(()=>appendMsg('bot','Echo: '+txt),300)}
+}
+
+/* ── Messages ── */
+function appendMsg(role,text){
+  const el=document.createElement('div');
+  el.className='msg msg-'+(role==='user'?'user':'bot');
+  el.innerHTML=role==='user'?esc(text):renderMd(text);
+  messagesEl.appendChild(el);
+  el.scrollIntoView({behavior:'smooth',block:'end'});
+}
+
+function renderMd(t){
+  if(typeof marked!=='undefined'){try{return marked.parse(t)}catch(e){}}
+  return esc(t).replace(/\n/g,'<br>');
+}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+/* ── WebSocket ── */
+function connectWS(){
+  try{
+    const proto=location.protocol==='https:'?'wss:':'ws:';
+    ws=new WebSocket(proto+'//'+location.host+'/ws');
+    ws.onopen=()=>{$('#status-badge').textContent='● Connected'};
+    ws.onclose=()=>{$('#status-badge').textContent='● Offline';ws=null};
+    ws.onerror=()=>{ws=null};
+    ws.onmessage=(e)=>{
+      try{const m=JSON.parse(e.data);handleWS(m)}catch(er){}
     };
-  }
-
-  // ── WebSocket ────────────────────────────────────────────────────
-  function connectWS() {
-    if (state.ws && state.ws.readyState <= 1) return;
-
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${location.host}/ws`;
-
-    try {
-      state.ws = new WebSocket(url);
-    } catch (e) {
-      updateConnectionStatus(false);
-      // Don't spam reconnect on static server (no WS support)
-      return;
+  }catch(e){}
+}
+function handleWS(m){
+  if(m.type==='token'){
+    if(!streaming){streaming=true;streamBuf='';appendMsg('bot','');}
+    streamBuf+=m.content;
+    const last=messagesEl.lastElementChild;
+    if(last)last.innerHTML=renderMd(streamBuf);
+  }else if(m.type==='done'){
+    streaming=false;
+    if(m.usage&&tokEl)tokEl.textContent=(m.usage.input_tokens||0)+' in / '+(m.usage.output_tokens||0)+' out';
+  }else if(m.type==='error'){
+    appendMsg('bot','Error: '+m.message);
+  }else if(m.type==='tool_use'){
+    const card=document.createElement('div');
+    card.className='tcard';card.id='tc_'+m.id;
+    card.innerHTML=`<div class="tcard-hdr" onclick="this.parentElement.classList.toggle('open')"><span class="tcard-name">${esc(m.tool)}</span><span class="tcard-st">running...</span><span>&#9656;</span></div><div class="tcard-body"></div>`;
+    messagesEl.appendChild(card);card.scrollIntoView({behavior:'smooth'});
+  }else if(m.type==='tool_result'){
+    const card=$('#tc_'+m.id);
+    if(card){
+      const st=card.querySelector('.tcard-st');
+      const body=card.querySelector('.tcard-body');
+      st.textContent=m.error?'error':'done';
+      st.style.color=m.error?'var(--red)':'var(--green)';
+      if(body&&m.output)body.textContent=m.output;
     }
-
-    state.ws.onopen = () => {
-      state.connected = true;
-      state.reconnectDelay = 1000;
-      updateConnectionStatus(true);
-    };
-
-    state.ws.onclose = () => {
-      state.connected = false;
-      updateConnectionStatus(false);
-      if (state.streaming) {
-        state.streaming = false;
-        finalizeBotMessage();
-        updateSendButton();
-      }
-      scheduleReconnect();
-    };
-
-    state.ws.onerror = () => {
-      state.connected = false;
-      updateConnectionStatus(false);
-    };
-
-    state.ws.onmessage = (evt) => {
-      try {
-        const msg = JSON.parse(evt.data);
-        handleWSMessage(msg);
-      } catch (e) {
-        console.error('WS parse error:', e);
-      }
-    };
+  }else if(m.type==='permission_request'){
+    const el=document.createElement('div');
+    el.className='pcard';
+    el.innerHTML=`<div class="pcard-title">Permission: ${esc(m.tool)}</div><div class="pcard-desc">${esc(JSON.stringify(m.input||{}).slice(0,200))}</div><div class="pcard-btns"><button class="pbtn pbtn-ok" onclick="permReply('${m.id}',true,this.parentElement.parentElement)">Allow</button><button class="pbtn pbtn-no" onclick="permReply('${m.id}',false,this.parentElement.parentElement)">Deny</button></div>`;
+    messagesEl.appendChild(el);el.scrollIntoView({behavior:'smooth'});
   }
-
-  function scheduleReconnect() {
-    if (state.reconnectTimer) return;
-    state.reconnectAttempts = (state.reconnectAttempts || 0) + 1;
-    if (state.reconnectAttempts > 5) return; // stop after 5 attempts
-    state.reconnectTimer = setTimeout(() => {
-      state.reconnectTimer = null;
-      state.reconnectDelay = Math.min(state.reconnectDelay * 1.5, 15000);
-      connectWS();
-    }, state.reconnectDelay);
-  }
-
-  function sendWS(obj) {
-    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-      state.ws.send(JSON.stringify(obj));
-    }
-  }
-
-  function updateConnectionStatus(connected) {
-    if (connected) {
-      dom.statusText.textContent = 'Connected';
-      if (dom.chatSpinner) dom.chatSpinner.style.display = 'none';
-    } else {
-      dom.statusText.textContent = 'Reconnecting...';
-    }
-  }
-
-  // ── WS Message Handler ──────────────────────────────────────────
-  function handleWSMessage(msg) {
-    switch (msg.type) {
-      case 'token':
-        handleToken(msg.content);
-        break;
-      case 'tool_use':
-        handleToolUse(msg);
-        break;
-      case 'tool_result':
-        handleToolResult(msg);
-        break;
-      case 'done':
-        handleDone(msg);
-        break;
-      case 'error':
-        handleError(msg);
-        break;
-      case 'permission_request':
-        handlePermissionRequest(msg);
-        break;
-      default:
-        console.log('Unknown WS message type:', msg.type);
-    }
-  }
-
-  function handleToken(content) {
-    if (!state.streaming) {
-      state.streaming = true;
-      state.streamBuffer = '';
-      removeTypingIndicator();
-      appendBotMessage('');
-      if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'generating...';
-    }
-    state.streamBuffer += content;
-    updateStreamingMessage(state.streamBuffer);
-    updateSendButton();
-  }
-
-  function handleToolUse(msg) {
-    removeTypingIndicator();
-    if (state.streaming) {
-      finalizeBotMessage();
-      state.streaming = false;
-      state.streamBuffer = '';
-    }
-
-    const toolId = msg.id || ('tool_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6));
-    const card = createToolCard(msg.tool, msg.input, toolId);
-    dom.messages.appendChild(card);
-    state.currentToolCards[toolId] = card;
-    scrollToBottom();
-    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = `running ${msg.tool}...`;
-  }
-
-  function handleToolResult(msg) {
-    const toolId = msg.id || Object.keys(state.currentToolCards).pop();
-    const card = state.currentToolCards[toolId];
-    if (card) {
-      const statusEl = card.querySelector('.tool-card-status');
-      const bodyEl = card.querySelector('.tool-card-body');
-      const outputEl = card.querySelector('.tool-output');
-
-      if (msg.error) {
-        statusEl.textContent = 'error';
-        statusEl.style.color = 'var(--red)';
-        card.classList.add('tool-error');
-      } else {
-        statusEl.textContent = 'done';
-        statusEl.style.color = 'var(--green)';
-      }
-
-      if (outputEl && msg.output) {
-        outputEl.textContent = msg.output.slice(0, 5000);
-      }
-    }
-    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'generating...';
-    scrollToBottom();
-  }
-
-  function handleDone(msg) {
-    if (state.streaming) {
-      finalizeBotMessage();
-    }
-    state.streaming = false;
-    state.streamBuffer = '';
-    removeTypingIndicator();
-    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'ready';
-
-    if (msg.usage) {
-      const { input_tokens, output_tokens } = msg.usage;
-      if (input_tokens || output_tokens) {
-        if (dom.tokenCount) dom.tokenCount.textContent = `${(input_tokens || 0).toLocaleString()} in / ${(output_tokens || 0).toLocaleString()} out`;
-      }
-    }
-    updateSendButton();
-    scrollToBottom();
-  }
-
-  function handleError(msg) {
-    state.streaming = false;
-    state.streamBuffer = '';
-    removeTypingIndicator();
-    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'error';
-    showToast(msg.message || 'An error occurred');
-    updateSendButton();
-  }
-
-  function handlePermissionRequest(msg) {
-    removeTypingIndicator();
-    if (state.streaming) {
-      finalizeBotMessage();
-      state.streaming = false;
-      state.streamBuffer = '';
-    }
-    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'awaiting permission';
-
-    const card = createPermissionCard(msg);
-    dom.messages.appendChild(card);
-    scrollToBottom();
-  }
-
-  // ── Message Rendering ───────────────────────────────────────────
-  function appendUserMessage(text) {
-    const el = document.createElement('div');
-    el.className = 'msg msg-user';
-    el.textContent = text;
-    dom.messages.appendChild(el);
-    state.messages.push({ role: 'user', content: text });
-    scrollToBottom();
-  }
-
-  function appendBotMessage(text) {
-    const el = document.createElement('div');
-    el.className = 'msg msg-assistant streaming-cursor';
-    el.innerHTML = renderMarkdown(text);
-    el.dataset.msgIndex = state.messages.length;
-    dom.messages.appendChild(el);
-    state.messages.push({ role: 'assistant', content: text });
-    scrollToBottom();
-  }
-
-  function updateStreamingMessage(text) {
-    const els = dom.messages.querySelectorAll('.msg-assistant.streaming-cursor');
-    const el = els[els.length - 1];
-    if (el) {
-      el.innerHTML = renderMarkdown(text);
-      el.classList.add('streaming-cursor');
-      const idx = parseInt(el.dataset.msgIndex);
-      if (!isNaN(idx) && state.messages[idx]) {
-        state.messages[idx].content = text;
-      }
-    }
-    scrollToBottom();
-  }
-
-  function finalizeBotMessage() {
-    const els = dom.messages.querySelectorAll('.streaming-cursor');
-    els.forEach(el => el.classList.remove('streaming-cursor'));
-  }
-
-  function showTypingIndicator() {
-    if (dom.messages.querySelector('.typing-indicator')) return;
-    const el = document.createElement('div');
-    el.className = 'typing-indicator';
-    el.innerHTML = '<span></span><span></span><span></span>';
-    dom.messages.appendChild(el);
-    scrollToBottom();
-  }
-
-  function removeTypingIndicator() {
-    const el = dom.messages.querySelector('.typing-indicator');
-    if (el) el.remove();
-  }
-
-  function createToolCard(toolName, input, toolId) {
-    const card = document.createElement('div');
-    const cls = toolName.toLowerCase().includes('bash') || toolName.toLowerCase().includes('command')
-      ? '' : toolName.toLowerCase().includes('file') || toolName.toLowerCase().includes('edit')
-      ? 'tool-file' : toolName.toLowerCase().includes('web') || toolName.toLowerCase().includes('fetch')
-      ? 'tool-web' : '';
-    card.className = `tool-card ${cls}`;
-    card.dataset.toolId = toolId;
-
-    const icon = toolName.toLowerCase().includes('bash') || toolName.toLowerCase().includes('command')
-      ? '&#9638;' : toolName.toLowerCase().includes('file') || toolName.toLowerCase().includes('edit')
-      ? '&#128196;' : toolName.toLowerCase().includes('web') || toolName.toLowerCase().includes('fetch')
-      ? '&#127760;' : '&#9881;';
-
-    let inputPreview = '';
-    if (input) {
-      if (typeof input === 'string') {
-        inputPreview = input.slice(0, 120);
-      } else if (input.command) {
-        inputPreview = input.command.slice(0, 120);
-      } else if (input.file_path) {
-        inputPreview = input.file_path;
-      } else {
-        try { inputPreview = JSON.stringify(input).slice(0, 120); }
-        catch(e) { inputPreview = '...'; }
-      }
-    }
-
-    card.innerHTML = `
-      <div class="tool-card-header">
-        <span class="tool-card-icon">${icon}</span>
-        <span class="tool-card-name">${escapeHtml(toolName)}</span>
-        <span class="tool-card-status" style="color:var(--yellow)">running</span>
-        <span class="tool-card-chevron">&#9654;</span>
-      </div>
-      <div class="tool-card-body">
-        ${inputPreview ? `<div class="tool-input-label">Input</div><pre class="tool-output">${escapeHtml(inputPreview)}</pre>` : ''}
-        <div class="tool-input-label" style="margin-top:8px">Output</div>
-        <pre class="tool-output">Waiting...</pre>
-      </div>
-    `;
-
-    card.querySelector('.tool-card-header').addEventListener('click', () => {
-      card.classList.toggle('open');
-    });
-
-    return card;
-  }
-
-  function createPermissionCard(msg) {
-    const card = document.createElement('div');
-    card.className = 'perm-card';
-
-    const desc = msg.tool ? `${msg.tool}: ${JSON.stringify(msg.input || {}).slice(0, 200)}`
-                          : (msg.description || msg.message || 'Permission requested');
-
-    const permId = msg.id || ('perm_' + Date.now());
-
-    card.innerHTML = `
-      <div class="perm-card-title">&#9888; Permission Required</div>
-      <div class="perm-card-desc">${escapeHtml(desc)}</div>
-      <div class="perm-card-actions" id="perm-actions-${permId}">
-        <button class="perm-btn perm-btn-allow" data-perm-id="${permId}">Allow</button>
-        <button class="perm-btn perm-btn-deny" data-perm-id="${permId}">Deny</button>
-      </div>
-    `;
-
-    const allowBtn = card.querySelector('.perm-btn-allow');
-    const denyBtn = card.querySelector('.perm-btn-deny');
-    const actionsDiv = card.querySelector('.perm-card-actions');
-
-    allowBtn.addEventListener('click', () => {
-      sendWS({ type: 'permission_response', id: permId, allowed: true });
-      actionsDiv.innerHTML = '<div class="perm-resolved allowed">&#10003; Allowed</div>';
-      if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'generating...';
-    });
-
-    denyBtn.addEventListener('click', () => {
-      sendWS({ type: 'permission_response', id: permId, allowed: false });
-      actionsDiv.innerHTML = '<div class="perm-resolved denied">&#10005; Denied</div>';
-      if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'ready';
-    });
-
-    return card;
-  }
-
-  // ── Toasts ──────────────────────────────────────────────────────
-  function showToast(message) {
-    const el = document.createElement('div');
-    el.className = 'toast';
-    el.textContent = message;
-    dom.toastContainer.appendChild(el);
-    setTimeout(() => {
-      el.style.opacity = '0';
-      el.style.transition = 'opacity 200ms';
-      setTimeout(() => el.remove(), 200);
-    }, 5000);
-  }
-
-  // ── Scroll ──────────────────────────────────────────────────────
-  function scrollToBottom() {
-    requestAnimationFrame(() => {
-      dom.messages.scrollTop = dom.messages.scrollHeight;
-    });
-  }
-
-  // ── View Switching ──────────────────────────────────────────────
-  function switchToHome() {
-    state.currentView = 'home';
-    dom.homeView.classList.remove('hidden');
-    dom.chatView.classList.add('hidden');
-    renderHomeSessionList();
-  }
-
-  function switchToChat(sessionTitle) {
-    state.currentView = 'chat';
-    dom.homeView.classList.add('hidden');
-    dom.chatView.classList.remove('hidden');
-    dom.chatTitle.textContent = sessionTitle || 'New Session';
-    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = state.connected ? 'ready' : 'disconnected';
-    dom.messages.innerHTML = '';
-    state.messages = [];
-    state.streamBuffer = '';
-    state.streaming = false;
-    state.currentToolCards = {};
-    if (dom.tokenCount) dom.tokenCount.textContent = '';
-    dom.msgInput.focus();
-    updateSendButton();
-  }
-
-  // ── Send / Cancel ───────────────────────────────────────────────
-  function sendMessage() {
-    const text = dom.msgInput.value.trim();
-    if (!text || !state.connected) return;
-
-    appendUserMessage(text);
-    sendWS({ type: 'message', content: text });
-    dom.msgInput.value = '';
-    autoResizeInput();
-    showTypingIndicator();
-    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'thinking...';
-    updateSendButton();
-  }
-
-  function cancelGeneration() {
-    sendWS({ type: 'cancel' });
-    state.streaming = false;
-    state.streamBuffer = '';
-    finalizeBotMessage();
-    removeTypingIndicator();
-    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'cancelled';
-    updateSendButton();
-    setTimeout(() => {
-      if (if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status === 'cancelled') {
-        if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'ready';
-      }
-    }, 2000);
-  }
-
-  function updateSendButton() {
-    if (state.streaming) {
-      dom.sendBtn.innerHTML = '&#9632;';
-      dom.sendBtn.classList.add('cancel-mode');
-      dom.sendBtn.disabled = false;
-      dom.sendBtn.title = 'Cancel';
-    } else {
-      dom.sendBtn.innerHTML = '&#10148;';
-      dom.sendBtn.classList.remove('cancel-mode');
-      dom.sendBtn.disabled = false;
-      dom.sendBtn.title = 'Send';
-    }
-  }
-
-  // ── Textarea Auto-Resize ────────────────────────────────────────
-  function autoResizeInput() {
-    const el = dom.msgInput;
-    el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
-  }
-
-  // ── Sidebar & Panel ─────────────────────────────────────────────
-  function renderProjectAvatars() {
-    dom.projectAvatars.innerHTML = '';
-    state.projects.forEach(proj => {
-      const av = document.createElement('div');
-      av.className = 'project-avatar' + (state.activeProjectId === proj.id ? ' active' : '');
-      av.textContent = proj.short;
-      av.title = proj.name;
-      av.style.marginBottom = '6px';
-      av.addEventListener('click', () => toggleProject(proj.id));
-      dom.projectAvatars.appendChild(av);
-    });
-  }
-
-  function toggleProject(projectId) {
-    if (state.activeProjectId === projectId && dom.projectPanel.classList.contains('open')) {
-      closePanel();
-    } else {
-      openPanel(projectId);
-    }
-  }
-
-  function openPanel(projectId) {
-    state.activeProjectId = projectId;
-    const proj = state.projects.find(p => p.id === projectId);
-    dom.panelProjectName.textContent = proj ? proj.name : 'Project';
-    dom.projectPanel.classList.add('open');
-    renderProjectAvatars();
-    renderSessionList();
-  }
-
-  function closePanel() {
-    state.activeProjectId = null;
-    dom.projectPanel.classList.remove('open');
-    renderProjectAvatars();
-    closeMobileSidebar();
-  }
-
-  function renderSessionList() {
-    const sessions = state.sessions[state.activeProjectId] || [];
-    dom.sessionList.innerHTML = '';
-    sessions.forEach(session => {
-      const el = document.createElement('div');
-      el.className = 'session-item' + (state.activeSessionId === session.id ? ' active' : '');
-      el.innerHTML = `
-        <div class="session-title">${escapeHtml(session.title)}</div>
-        <div class="session-meta">${session.time} &middot; ${session.messages} msgs</div>
-      `;
-      el.addEventListener('click', () => {
-        state.activeSessionId = session.id;
-        switchToChat(session.title);
-        closePanel();
-      });
-      dom.sessionList.appendChild(el);
-    });
-  }
-
-  function renderHomeSessionList() {
-    dom.homeSessionList.innerHTML = '';
-    const allSessions = [];
-    Object.keys(state.sessions).forEach(pid => {
-      const proj = state.projects.find(p => p.id === pid);
-      state.sessions[pid].forEach(s => {
-        allSessions.push({ ...s, projectName: proj ? proj.name : 'Unknown' });
-      });
-    });
-
-    if (allSessions.length === 0) {
-      dom.homeSessionList.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px">No sessions yet. Start a new one below.</p>';
-      return;
-    }
-
-    allSessions.slice(0, 6).forEach(session => {
-      const el = document.createElement('div');
-      el.className = 'home-session-card';
-      el.innerHTML = `
-        <div class="home-session-card-title">${escapeHtml(session.title)}</div>
-        <div class="home-session-card-meta">
-          <span>${escapeHtml(session.projectName)}</span>
-          <span>${session.time}</span>
-          <span>${session.messages} messages</span>
-        </div>
-      `;
-      el.addEventListener('click', () => {
-        state.activeSessionId = session.id;
-        switchToChat(session.title);
-      });
-      dom.homeSessionList.appendChild(el);
-    });
-  }
-
-  // ── New Project ─────────────────────────────────────────────────
-  function addNewProject() {
-    const name = prompt('Project name:');
-    if (!name || !name.trim()) return;
-    const short = name.trim().slice(0, 2).toUpperCase();
-    const id = 'p_' + Date.now();
-    state.projects.push({ id, name: name.trim(), short });
-    state.sessions[id] = [];
-    renderProjectAvatars();
-    openPanel(id);
-  }
-
-  // ── Mobile Sidebar ──────────────────────────────────────────────
-  function openMobileSidebar() {
-    dom.sidebarRail.classList.add('mobile-open');
-    dom.mobileOverlay.classList.add('visible');
-  }
-
-  function closeMobileSidebar() {
-    dom.sidebarRail.classList.remove('mobile-open');
-    dom.mobileOverlay.classList.remove('visible');
-  }
-
-  // ── Event Bindings ──────────────────────────────────────────────
-  function bindEvents() {
-    try {
-    // Back to home
-    if (dom.chatBackBtn) dom.chatBackBtn.addEventListener('click', switchToHome);
-    // Tab switching (Session / Changes)
-    if (dom.tabSession) dom.tabSession.addEventListener('click', () => {
-      dom.tabSession.classList.add('active');
-      dom.tabChanges.classList.remove('active');
-      dom.sessionTabContent.style.display = 'flex';
-      dom.changesTabContent.style.display = 'none';
-    });
-    if (dom.tabChanges) dom.tabChanges.addEventListener('click', () => {
-      dom.tabChanges.classList.add('active');
-      dom.tabSession.classList.remove('active');
-      dom.changesTabContent.style.display = 'block';
-      dom.sessionTabContent.style.display = 'none';
-    });
-
-    // New session buttons
-    if (dom.homeNewSessionBtn) dom.homeNewSessionBtn.addEventListener('click', () => {
-      state.activeSessionId = 'new_' + Date.now();
-      switchToChat('New Session');
-    });
-    if (dom.panelNewSessionBtn) dom.panelNewSessionBtn.addEventListener('click', () => {
-      state.activeSessionId = 'new_' + Date.now();
-      switchToChat('New Session');
-      closePanel();
-    });
-
-    // Composer
-    if (dom.msgInput) dom.msgInput.addEventListener('input', autoResizeInput);
-    if (dom.msgInput) dom.msgInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        if (state.streaming) {
-          cancelGeneration();
-        } else {
-          sendMessage();
-        }
-      }
-    });
-
-    if (dom.sendBtn) dom.sendBtn.addEventListener('click', () => {
-      if (state.streaming) {
-        cancelGeneration();
-      } else {
-        sendMessage();
-      }
-    });
-
-    // Rail buttons
-    if (dom.railMenuBtn) dom.railMenuBtn.addEventListener('click', () => {
-      if (dom.projectPanel.classList.contains('open')) {
-        closePanel();
-      } else if (state.projects.length > 0) {
-        openPanel(state.projects[0].id);
-      }
-    });
-
-    if (dom.railAddBtn) dom.railAddBtn.addEventListener('click', addNewProject);
-
-    if (dom.railSettingsBtn) dom.railSettingsBtn.addEventListener('click', () => {
-      showToast('Settings panel coming soon');
-    });
-
-    if (dom.railHelpBtn) dom.railHelpBtn.addEventListener('click', () => {
-      showToast('OpenLLM v0.1.0 — Local-first LLM development platform');
-    });
-
-    // Panel close
-    if (dom.panelCloseBtn) dom.panelCloseBtn.addEventListener('click', closePanel);
-
-    // Mobile — rail menu button acts as hamburger
-    if (dom.railMenuBtn) {
-      dom.railMenuBtn.addEventListener('click', () => {
-        if (dom.sidebarRail.classList.contains('mobile-open')) {
-          closeMobileSidebar();
-        } else {
-          openMobileSidebar();
-        }
-      });
-    }
-    if (dom.mobileOverlay) {
-      dom.mobileOverlay.addEventListener('click', () => {
-        closeMobileSidebar();
-        closePanel();
-      });
-    }
-    } catch(e) { console.error('BIND ERROR:', e); }
-  }
-
-  // ── Provider Detection ──────────────────────────────────────────
-  function detectProvider() {
-    // Attempt to read provider info from server
-    fetch('/api/status', { method: 'GET' })
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data && data.provider) {
-          dom.providerText.textContent = data.provider;
-        } else if (data && data.model) {
-          dom.providerText.textContent = data.model;
-        } else {
-          dom.providerText.textContent = 'Local';
-        }
-      })
-      .catch(() => {
-        dom.providerText.textContent = 'Local';
-      });
-  }
-
-  // ── Initialize ──────────────────────────────────────────────────
-  function init() {
-    try {
-    initDemoData();
-    renderProjectAvatars();
-    renderHomeSessionList();
-    bindEvents();
-    connectWS();
-    detectProvider();
-    updateSendButton();
-    } catch(e) { console.error('INIT ERROR:', e); document.title = 'ERR: ' + e.message; }
-
-    // Focus input when chat view is visible
-    const observer = new MutationObserver(() => {
-      if (!dom.chatView.classList.contains('hidden')) {
-        dom.msgInput.focus();
-      }
-    });
-    observer.observe(dom.chatView, { attributes: true, attributeFilter: ['class'] });
-  }
-
-  // Boot
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
-})();
+}
+function permReply(id,allowed,el){
+  if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'permission_response',id,allowed}));
+  el.innerHTML=`<div style="font-size:12px;font-weight:600;color:${allowed?'var(--green)':'var(--red)'}">${allowed?'Allowed':'Denied'}</div>`;
+}
+
+function addProject(){
+  const name=prompt('Project name:');
+  if(!name)return;
+  projects.push({id:'p'+Date.now(),name,short:name.slice(0,2).toUpperCase(),color:'#'+Math.floor(Math.random()*0xffffff).toString(16).padStart(6,'0'),sessions:[]});
+  renderAvatars();renderHome();
+}
+
+/* ── Boot ── */
+renderAvatars();
+renderHome();
+connectWS();
 </script>
 </body>
 </html>
