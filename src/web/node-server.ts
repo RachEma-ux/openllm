@@ -15,6 +15,13 @@ import { WebSocketServer, WebSocket } from 'ws'
 const PUBLIC_DIR = resolve(import.meta.dirname || __dirname, 'public')
 const PORT = parseInt(process.env.OPENLLM_WEB_PORT || '5000', 10)
 
+// ── Termux/Android detection ──
+const IS_TERMUX = !!(process.env.PREFIX?.includes('com.termux') || process.cwd().includes('/data/data/com.termux'))
+if (IS_TERMUX) {
+  process.env.TMPDIR = process.env.TMPDIR || '/data/data/com.termux/files/usr/tmp'
+  console.log('[openllm] Termux detected — mobile optimizations active')
+}
+
 const MIME: Record<string, string> = {
   '.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript',
   '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
@@ -42,6 +49,21 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   if (url === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ status: 'ok', version: '1.0.0', provider: process.env.OPENLLM_PROVIDER || 'ollama' }))
+    return true
+  }
+  if (url === '/api/status') {
+    const mem = process.memoryUsage()
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      platform: IS_TERMUX ? 'termux' : process.platform,
+      arch: process.arch,
+      termux: IS_TERMUX,
+      node: process.version,
+      memory: { rss: Math.round(mem.rss / 1024 / 1024), heap: Math.round(mem.heapUsed / 1024 / 1024) },
+      uptime: Math.round(process.uptime()),
+      sessions: conversations.size,
+      maxHistory: MAX_HISTORY,
+    }))
     return true
   }
   if (url === '/api/config') {
@@ -125,8 +147,8 @@ if (process.env.OPENAI_MODEL) {
   PROVIDER_REGISTRY.ollama.defaultModel = process.env.OPENAI_MODEL
 }
 
-// Per-session conversation history keyed by provider+model (max 10 turns)
-const MAX_HISTORY = 10
+// Per-session conversation history — shorter on mobile to save RAM
+const MAX_HISTORY = IS_TERMUX ? 5 : 10
 const conversations = new Map<string, Array<{role: string, content: string}>>()
 
 function getConversation(provider: string, model: string) {
@@ -166,9 +188,9 @@ async function streamLLM(prompt: string, provider: string, model: string, broadc
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: llmModel, messages, stream: true,
-        // Limit context window for local models to keep response fast
+        // Limit context window for local models — tighter on Termux
         ...(provider === 'ollama' || provider === 'lmstudio' || provider === 'atomic-chat'
-          ? { options: { num_ctx: 2048, num_predict: 256 } } : {}),
+          ? { options: { num_ctx: IS_TERMUX ? 1024 : 2048, num_predict: IS_TERMUX ? 128 : 256 } } : {}),
       }),
     })
 

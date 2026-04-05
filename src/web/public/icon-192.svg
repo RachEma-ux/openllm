@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <rect width="192" height="192" rx="32" fill="#0d0d0d"/>
+  <rect x="8" y="8" width="176" height="176" rx="28" fill="#111"/>
+  <text x="96" y="118" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="72" font-weight="800" fill="#6366f1" text-anchor="middle" letter-spacing="-2">OL</text>
+  <circle cx="152" cy="48" r="12" fill="#22c55e"/>
+</svg>

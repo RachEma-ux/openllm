@@ -2,9 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>OpenLLM</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-192.svg">
+<meta name="theme-color" content="#6366f1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -138,7 +144,39 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .toast{position:fixed;bottom:20px;right:20px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:13px;color:var(--text);z-index:999;animation:fadein .2s}
 
 /* Mobile */
-@media(max-width:700px){.rail{display:none}.panel{display:none}}
+@media(max-width:700px){
+  .rail{display:none}
+  .panel{display:none}
+  #app{flex-direction:column;height:100dvh}
+  .main{height:100dvh}
+  .composer{padding:6px 8px 10px;padding-bottom:calc(6px + env(safe-area-inset-bottom))}
+  .comp-box textarea{font-size:16px}
+  .comp-send{width:44px;height:44px;border-radius:10px}
+  .comp-attach{width:44px;height:44px}
+  .msg{max-width:92%}
+  .msg-user{padding:12px 16px;font-size:15px}
+  .msg-bot{font-size:15px}
+  .chat-hdr{padding:8px 12px;padding-top:calc(8px + env(safe-area-inset-top))}
+  .tabs .tab{padding:12px 0;font-size:16px}
+  .sess-pane{padding:12px 10px}
+  .tcard-hdr{padding:12px 14px}
+  .pcard{padding:14px 16px}
+  .pbtn{padding:10px 20px;font-size:14px}
+  .pcard-btns{flex-direction:column;gap:8px}
+  .pbtn-ok,.pbtn-no{width:100%;text-align:center}
+  .toolbar{flex-wrap:wrap;gap:4px}
+  .tool-item{padding:6px 10px;font-size:14px}
+  #home{padding:20px 16px}
+  .hero h1{font-size:24px}
+  .new-btn{font-size:16px;padding:16px}
+  .hcard{padding:16px}
+  .hcard .t{font-size:15px}
+  /* Bottom nav for mobile */
+  .mobile-nav{display:flex !important}
+}
+@media(min-width:701px){
+  .mobile-nav{display:none !important}
+}
 </style>
 </head>
 <body>
@@ -276,6 +314,24 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Mobile Bottom Nav -->
+  <div class="mobile-nav" style="display:none;flex-shrink:0;border-top:1px solid var(--border);background:var(--bg2);padding:6px 0;padding-bottom:calc(6px + env(safe-area-inset-bottom))">
+    <div style="display:flex;justify-content:space-around;align-items:center">
+      <button onclick="goHome()" style="background:none;border:none;color:var(--dim);font-size:11px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 16px;cursor:pointer">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        Home
+      </button>
+      <button onclick="newSession()" style="background:none;border:none;color:var(--dim);font-size:11px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 16px;cursor:pointer">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        Chat
+      </button>
+      <button onclick="toggleMobileSettings()" style="background:none;border:none;color:var(--dim);font-size:11px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 16px;cursor:pointer">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Settings
+      </button>
     </div>
   </div>
 </div>
@@ -545,6 +601,58 @@ function fetchOllamaModels(){
   }).catch(()=>{});
 }
 fetchOllamaModels();
+
+/* ── Mobile Settings Toggle ── */
+function toggleMobileSettings(){
+  const msg = [
+    '⚙️ OpenLLM Settings',
+    '',
+    'Provider: ' + currentProvider,
+    'Model: ' + currentModel,
+    'Status: ' + ($('#status-badge')?.textContent || 'unknown'),
+    '',
+    'Change provider/model in the toolbar above the composer.',
+    'Remote agent: set URL in address bar.',
+  ].join('\n');
+  alert(msg);
+}
+
+/* ── PWA Install Prompt ── */
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // Show install hint on home page
+  const btn = document.createElement('button');
+  btn.className = 'new-btn';
+  btn.style.marginTop = '12px';
+  btn.style.background = '#22c55e';
+  btn.textContent = 'Install App';
+  btn.onclick = () => {
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then(() => { deferredPrompt = null; btn.remove(); });
+  };
+  const home = $('#home');
+  if (home) home.appendChild(btn);
+});
+
+/* ── Service Worker ── */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then(() => {
+    console.log('[pwa] Service worker registered');
+  }).catch((e) => {
+    console.warn('[pwa] SW registration failed:', e);
+  });
+}
+
+/* ── Mobile Keyboard Handling ── */
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => {
+    // Scroll chat to bottom when keyboard opens
+    const pane = $('#sess-pane');
+    if (pane) pane.scrollTop = pane.scrollHeight;
+  });
+}
 </script>
 </body>
 </html>
