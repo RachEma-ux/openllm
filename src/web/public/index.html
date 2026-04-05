@@ -535,11 +535,7 @@ function goHome(){
   chatEl.classList.remove('show');
   homeEl.classList.remove('hide');
 }
-function newSession(){
-  currentSessionId='s_'+Date.now();
-  currentMessages=[];
-  openChat('New Session');
-}
+function newSession(){openChat('New Session')}
 
 /* ── Tabs ── */
 function switchTab(name,el){
@@ -797,6 +793,10 @@ function refreshSettings(){
   renderBackends();
 }
 
+// Session state (must be before overrides)
+let currentSessionId=null;
+let currentMessages=[];
+
 // Update goHome to also hide settings
 const _goHome=goHome;
 goHome=function(){
@@ -806,7 +806,7 @@ goHome=function(){
   homeEl.classList.remove('hide');
 }
 
-// Update openChat to also hide settings
+// Update openChat to also hide settings + init session
 const _openChat=openChat;
 openChat=function(title){
   hideSettings();
@@ -816,6 +816,8 @@ openChat=function(title){
   chatTitle.textContent=title||'New Session';
   messagesEl.innerHTML='';
   streamBuf='';streaming=false;
+  currentSessionId='s_'+Date.now();
+  currentMessages=[];
   inputEl.focus();
 }
 
@@ -897,8 +899,6 @@ async function dbClearAll(){
 }
 
 // Save current chat session
-let currentSessionId=null;
-let currentMessages=[];
 function saveCurrentSession(){
   if(!currentSessionId)return;
   dbSaveSession(currentSessionId,chatTitle.textContent,currentMessages);
