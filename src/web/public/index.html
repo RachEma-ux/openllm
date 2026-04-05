@@ -245,8 +245,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <div class="tool-item" style="position:relative">
             <span class="model-badge" id="provider-icon">O</span>
             <select id="provider-sel" onchange="selectProvider(this.value)" style="background:none;border:none;color:var(--dim);font-size:13px;font-family:inherit;outline:none;cursor:pointer;appearance:none;-webkit-appearance:none;padding-right:14px">
-              <option value="ollama">Ollama</option>
-              <option value="openai" selected>OpenAI</option>
+              <option value="ollama" selected>Ollama</option>
+              <option value="openai">OpenAI</option>
               <option value="gemini">Gemini</option>
               <option value="anthropic">Anthropic</option>
               <option value="codex">Codex (ChatGPT)</option>
@@ -387,13 +387,15 @@ function switchTab(name,el){
 /* ── Composer ── */
 function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,120)+'px'}
 function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}
+let providerStatus={};
 function send(){
   const txt=inputEl.value.trim();
   if(!txt)return;
+  if(!ws||ws.readyState!==1){appendMsg('bot','Error: Not connected to server. Reconnecting...');connectWS();return}
+  if(providerStatus[currentProvider]===false){appendMsg('user',txt);appendMsg('bot','Error: No API key for '+currentProvider+'. Use Ollama (local) or set the env var.');inputEl.value='';return}
   appendMsg('user',txt);
   inputEl.value='';inputEl.style.height='auto';
-  if(ws&&ws.readyState===1){ws.send(JSON.stringify({type:'message',content:txt}))}
-  else{setTimeout(()=>appendMsg('bot','Echo: '+txt),300)}
+  ws.send(JSON.stringify({type:'message',content:txt,provider:currentProvider,model:currentModel}));
 }
 
 /* ── Messages ── */
@@ -412,17 +414,19 @@ function renderMd(t){
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 
 /* ── WebSocket ── */
+let wsRetry=null;
 function connectWS(){
+  if(wsRetry){clearTimeout(wsRetry);wsRetry=null}
   try{
     const proto=location.protocol==='https:'?'wss:':'ws:';
     ws=new WebSocket(proto+'//'+location.host+'/ws');
-    ws.onopen=()=>{$('#status-badge').textContent='● Connected'};
-    ws.onclose=()=>{$('#status-badge').textContent='● Offline';ws=null};
-    ws.onerror=()=>{ws=null};
+    ws.onopen=()=>{$('#status-badge').textContent='● Connected';$('#status-badge').style.color='var(--green)'};
+    ws.onclose=()=>{$('#status-badge').textContent='● Reconnecting...';$('#status-badge').style.color='var(--yellow)';ws=null;wsRetry=setTimeout(connectWS,2000)};
+    ws.onerror=()=>{};
     ws.onmessage=(e)=>{
       try{const m=JSON.parse(e.data);handleWS(m)}catch(er){}
     };
-  }catch(e){}
+  }catch(e){wsRetry=setTimeout(connectWS,2000)}
 }
 function handleWS(m){
   if(m.type==='token'){
@@ -463,7 +467,7 @@ function permReply(id,allowed,el){
 
 /* ── Providers & Models ── */
 const PROVIDERS = {
-  ollama:       {icon:'🦙',badge:'O',models:['llama3.2:3b','llama3.1:8b','qwen2.5-coder:7b','deepseek-coder:6.7b','phi3','mistral','codellama']},
+  ollama:       {icon:'🦙',badge:'O',models:[]},
   openai:       {icon:'',badge:'O',models:['gpt-4o','gpt-4o-mini','gpt-4.1','gpt-4.1-mini','o3-mini']},
   gemini:       {icon:'',badge:'G',models:['gemini-2.0-flash','gemini-2.5-pro','gemini-2.5-flash']},
   anthropic:    {icon:'',badge:'A',models:['claude-sonnet-4-5','claude-opus-4','claude-haiku-3-5']},
@@ -480,8 +484,8 @@ const PROVIDERS = {
   vertex:       {icon:'',badge:'V',models:['claude-3-5-sonnet@20241022','gemini-2.0-flash']},
   'atomic-chat':{icon:'',badge:'⚛',models:['(auto-detect local)']},
 };
-let currentProvider = 'openai';
-let currentModel = 'gpt-4o';
+let currentProvider = 'ollama';
+let currentModel = 'tinyllama';
 
 function selectProvider(prov){
   currentProvider = prov;
@@ -515,8 +519,32 @@ function addProject(){
 /* ── Boot ── */
 renderAvatars();
 renderHome();
-selectProvider('openai');
+selectProvider('ollama');
 connectWS();
+
+// Fetch available providers and mark unconfigured ones
+fetch('/api/providers').then(r=>r.json()).then(data=>{
+  const sel=$('#provider-sel');
+  if(!sel)return;
+  for(const opt of sel.options){
+    const info=data[opt.value];
+    if(info){
+      providerStatus[opt.value]=info.configured;
+      if(!info.configured) opt.textContent=opt.textContent+' (no key)';
+    }
+  }
+}).catch(()=>{});
+
+// Auto-detect Ollama models from local instance
+function fetchOllamaModels(){
+  fetch('/api/ollama-models').then(r=>r.json()).then(models=>{
+    if(Array.isArray(models)&&models.length){
+      PROVIDERS.ollama.models=models;
+      if(currentProvider==='ollama') selectProvider('ollama');
+    }
+  }).catch(()=>{});
+}
+fetchOllamaModels();
 </script>
 </body>
 </html>

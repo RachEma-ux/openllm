@@ -36,7 +36,7 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): boolean {
 }
 
 // ── API routes ──
-function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
+async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const url = new URL(req.url || '/', `http://localhost`).pathname
 
   if (url === '/api/health') {
@@ -51,6 +51,38 @@ function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
     }))
     return true
   }
+  if (url === '/api/ollama-models') {
+    try {
+      const ollamaBase = PROVIDER_REGISTRY.ollama.baseUrl.replace(/\/v1$/, '')
+      const r = await fetch(`${ollamaBase}/api/tags`)
+      if (r.ok) {
+        const data = await r.json() as { models?: Array<{name: string}> }
+        const names = (data.models || []).map((m: any) => m.name)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(names))
+        return true
+      }
+    } catch {}
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end('[]')
+    return true
+  }
+  if (url === '/api/providers') {
+    const available: Record<string, {configured: boolean, defaultModel: string}> = {}
+    for (const [name, cfg] of Object.entries(PROVIDER_REGISTRY)) {
+      const noKeyNeeded = ['ollama', 'lmstudio', 'atomic-chat'].includes(name)
+      available[name] = { configured: noKeyNeeded || !!cfg.apiKey, defaultModel: cfg.defaultModel }
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(available))
+    return true
+  }
+  if (url === '/api/clear') {
+    conversations.clear()
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ cleared: true }))
+    return true
+  }
   if (url === '/api/sessions') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end('[]')
@@ -59,22 +91,85 @@ function handleAPI(req: IncomingMessage, res: ServerResponse): boolean {
   return false
 }
 
-// ── LLM Provider (direct Ollama/OpenAI-compatible call) ──
-const LLM_BASE = process.env.OPENAI_BASE_URL || 'http://localhost:11434/v1'
-const LLM_KEY = process.env.OPENAI_API_KEY || 'ollama'
-const LLM_MODEL = process.env.OPENAI_MODEL || 'tinyllama'
-const messages: Array<{role: string, content: string}> = []
+// ── Provider Registry ──
+interface ProviderConfig {
+  baseUrl: string
+  apiKey: string
+  defaultModel: string
+}
 
-async function streamLLM(prompt: string, broadcast: (msg: any) => void): Promise<void> {
-  messages.push({ role: 'user', content: prompt })
+const PROVIDER_REGISTRY: Record<string, ProviderConfig> = {
+  ollama:     { baseUrl: 'http://localhost:11434/v1', apiKey: 'ollama', defaultModel: 'tinyllama' },
+  openai:     { baseUrl: 'https://api.openai.com/v1', apiKey: process.env.OPENAI_API_KEY || '', defaultModel: 'gpt-4o' },
+  gemini:     { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', apiKey: process.env.GEMINI_API_KEY || '', defaultModel: 'gemini-2.0-flash' },
+  anthropic:  { baseUrl: 'https://api.anthropic.com/v1', apiKey: process.env.ANTHROPIC_API_KEY || '', defaultModel: 'claude-sonnet-4-5-20241022' },
+  deepseek:   { baseUrl: 'https://api.deepseek.com/v1', apiKey: process.env.DEEPSEEK_API_KEY || '', defaultModel: 'deepseek-chat' },
+  groq:       { baseUrl: 'https://api.groq.com/openai/v1', apiKey: process.env.GROQ_API_KEY || '', defaultModel: 'llama-3.3-70b-versatile' },
+  together:   { baseUrl: 'https://api.together.xyz/v1', apiKey: process.env.TOGETHER_API_KEY || '', defaultModel: 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo' },
+  fireworks:  { baseUrl: 'https://api.fireworks.ai/inference/v1', apiKey: process.env.FIREWORKS_API_KEY || '', defaultModel: 'accounts/fireworks/models/llama-v3p1-70b-instruct' },
+  mistral:    { baseUrl: 'https://api.mistral.ai/v1', apiKey: process.env.MISTRAL_API_KEY || '', defaultModel: 'mistral-large-latest' },
+  lmstudio:   { baseUrl: 'http://localhost:1234/v1', apiKey: 'lm-studio', defaultModel: 'default' },
+  openrouter: { baseUrl: 'https://openrouter.ai/api/v1', apiKey: process.env.OPENROUTER_API_KEY || '', defaultModel: 'openai/gpt-4o' },
+  codex:      { baseUrl: 'https://api.openai.com/v1', apiKey: process.env.OPENAI_API_KEY || '', defaultModel: 'gpt-4o' },
+  github:     { baseUrl: 'https://models.inference.ai.azure.com', apiKey: process.env.GITHUB_TOKEN || '', defaultModel: 'openai/gpt-4o' },
+  bedrock:    { baseUrl: process.env.AWS_BEDROCK_URL || 'http://localhost:8000/v1', apiKey: process.env.AWS_ACCESS_KEY_ID || '', defaultModel: 'anthropic.claude-3-5-sonnet-20241022-v2:0' },
+  vertex:     { baseUrl: process.env.VERTEX_URL || 'http://localhost:8000/v1', apiKey: process.env.VERTEX_API_KEY || '', defaultModel: 'claude-3-5-sonnet@20241022' },
+  'atomic-chat': { baseUrl: 'http://localhost:11434/v1', apiKey: 'local', defaultModel: 'default' },
+}
+
+// Override defaults from env if set
+if (process.env.OPENAI_BASE_URL) {
+  PROVIDER_REGISTRY.ollama.baseUrl = process.env.OPENAI_BASE_URL
+}
+if (process.env.OPENAI_MODEL) {
+  PROVIDER_REGISTRY.ollama.defaultModel = process.env.OPENAI_MODEL
+}
+
+// Per-session conversation history keyed by provider+model (max 10 turns)
+const MAX_HISTORY = 10
+const conversations = new Map<string, Array<{role: string, content: string}>>()
+
+function getConversation(provider: string, model: string) {
+  const key = `${provider}:${model}`
+  if (!conversations.has(key)) conversations.set(key, [])
+  const msgs = conversations.get(key)!
+  // Keep only last N messages to prevent slowdown
+  if (msgs.length > MAX_HISTORY * 2) msgs.splice(0, msgs.length - MAX_HISTORY * 2)
+  return msgs
+}
+
+async function streamLLM(prompt: string, provider: string, model: string, broadcast: (msg: any) => void): Promise<void> {
+  const cfg = PROVIDER_REGISTRY[provider] || PROVIDER_REGISTRY.ollama
+  const baseUrl = cfg.baseUrl
+  const apiKey = cfg.apiKey
+  const llmModel = model || cfg.defaultModel
+
+  const history = getConversation(provider, llmModel)
+  if (history.length === 0) {
+    history.push({ role: 'system', content: 'You are a helpful assistant. Keep answers concise — 1-3 sentences unless asked for more detail.' })
+  }
+  history.push({ role: 'user', content: prompt })
+  const messages = history
+
   const usage = { input_tokens: 0, output_tokens: 0, cost_usd: 0 }
   let fullReply = ''
 
+  if (!apiKey && provider !== 'ollama' && provider !== 'lmstudio' && provider !== 'atomic-chat') {
+    broadcast({ type: 'error', message: `No API key configured for ${provider}. Set ${provider.toUpperCase()}_API_KEY env var.` })
+    broadcast({ type: 'done', usage })
+    return
+  }
+
   try {
-    const res = await fetch(`${LLM_BASE}/chat/completions`, {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LLM_KEY}` },
-      body: JSON.stringify({ model: LLM_MODEL, messages, stream: true }),
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: llmModel, messages, stream: true,
+        // Limit context window for local models to keep response fast
+        ...(provider === 'ollama' || provider === 'lmstudio' || provider === 'atomic-chat'
+          ? { options: { num_ctx: 2048, num_predict: 256 } } : {}),
+      }),
     })
 
     if (!res.ok) {
@@ -128,10 +223,12 @@ async function streamLLM(prompt: string, broadcast: (msg: any) => void): Promise
 
 // ── Main ──
 async function main() {
-  console.log(`[openllm] LLM: ${LLM_BASE} model=${LLM_MODEL}`)
+  const defaultCfg = PROVIDER_REGISTRY.ollama
+  console.log(`[openllm] Default LLM: ${defaultCfg.baseUrl} model=${defaultCfg.defaultModel}`)
+  console.log(`[openllm] Providers: ${Object.keys(PROVIDER_REGISTRY).join(', ')}`)
 
-  const server = createServer((req, res) => {
-    if (handleAPI(req, res)) return
+  const server = createServer(async (req, res) => {
+    if (await handleAPI(req, res)) return
     if (serveStatic(req, res)) return
     res.writeHead(404, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ error: 'Not found' }))
@@ -155,8 +252,14 @@ async function main() {
     ws.on('message', async (raw) => {
       try {
         const msg = JSON.parse(raw.toString())
-        if (msg.type === 'message' && msg.content) {
-          await streamLLM(msg.content, broadcast)
+        if (msg.type === 'clear') {
+          conversations.clear()
+          broadcast({ type: 'cleared' })
+        } else if (msg.type === 'message' && msg.content) {
+          const provider = msg.provider || 'ollama'
+          const model = msg.model || ''
+          console.log(`[llm] ${provider}/${model || '(default)'}: ${msg.content.slice(0, 60)}...`)
+          await streamLLM(msg.content, provider, model, broadcast)
         }
       } catch (e: any) {
         try { ws.send(JSON.stringify({ type: 'error', message: e.message })) } catch {}
@@ -169,10 +272,11 @@ async function main() {
     })
   })
 
-  server.listen(PORT, '127.0.0.1', () => {
-    console.log(`\x1b[36m[openllm] Server running on http://127.0.0.1:${PORT}/\x1b[0m`)
-    console.log(`[openllm] WebSocket: ws://127.0.0.1:${PORT}/ws`)
-    console.log(`[openllm] Engine: streaming via ${LLM_BASE} (${LLM_MODEL})`)
+  const HOST = process.env.OPENLLM_HOST || '127.0.0.1'
+  server.listen(PORT, HOST, () => {
+    console.log(`\x1b[36m[openllm] Server running on http://${HOST}:${PORT}/\x1b[0m`)
+    console.log(`[openllm] WebSocket: ws://${HOST}:${PORT}/ws`)
+    console.log(`[openllm] Multi-provider routing enabled`)
   })
 }
 

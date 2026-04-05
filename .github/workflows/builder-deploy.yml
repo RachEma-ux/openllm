@@ -297,114 +297,42 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
 
           VERSION="${{ steps.version.outputs.VERSION }}"
           PROVIDER="${{ github.event.inputs.provider }}"
 
-          echo "Starting OpenLLM with provider: $PROVIDER"
+          echo "Starting OpenLLM Web UI with provider: $PROVIDER"
 
-          # Create a workspace directory
-          mkdir -p /tmp/openllm-workspace
-          cd /tmp/openllm-workspace
+          # ── Install tsx for Node.js TypeScript execution ──
+          npm install -g tsx ws
 
-          # Initialize git repo (OpenLLM needs a git context)
-          git init
-          git config user.email "deploy@openllm.dev"
-          git config user.name "OpenLLM Deploy"
-          echo "# OpenLLM Test Workspace" > README.md
-          git add . && git commit -m "init"
-
-          # Copy built dist
-          cp -r "$GITHUB_WORKSPACE/dist" .
-          cp -r "$GITHUB_WORKSPACE/bin" .
-          cp "$GITHUB_WORKSPACE/package.json" .
-
-          # Configure provider
+          # ── Configure Ollama if selected ──
           if [ "$PROVIDER" = "ollama" ]; then
-            export OLLAMA_BASE_URL="http://localhost:11434"
+            export OPENAI_BASE_URL="http://localhost:11434/v1"
+            export OPENAI_MODEL="llama3.2:3b"
           fi
 
-          # Start OpenLLM in serve/web mode if available, otherwise use the HTTP bridge
-          echo "Starting OpenLLM HTTP bridge on port 3000..."
-
-          # Create a minimal Express server that wraps the CLI
-          cat > server.mjs <<'SERVEREOF'
-          import { createServer } from 'http';
-          import { readFileSync, existsSync } from 'fs';
-
-          const PORT = 3000;
-
-          const server = createServer((req, res) => {
-            if (req.url === '/health' || req.url === '/api/health') {
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ status: 'ok', app: 'openllm', version: process.env.VERSION || '0.0.0' }));
-              return;
-            }
-
-            if (req.url === '/') {
-              res.writeHead(200, { 'Content-Type': 'text/html' });
-              res.end(`<!DOCTYPE html>
-          <html><head><meta charset="utf-8"><title>OpenLLM</title>
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { background: #0d0d0d; color: #e8e8e8; font-family: -apple-system, system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-            .card { max-width: 600px; padding: 48px; text-align: center; }
-            h1 { font-size: 2.5rem; margin-bottom: 16px; }
-            h1 span { color: #6366f1; }
-            .version { color: #888; font-size: 0.9rem; margin-bottom: 32px; }
-            .desc { color: #aaa; line-height: 1.6; margin-bottom: 32px; }
-            .providers { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 32px; }
-            .provider { padding: 6px 14px; background: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 6px; font-size: 0.85rem; color: #ccc; }
-            .install { background: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 8px; padding: 16px 24px; font-family: monospace; font-size: 0.9rem; color: #6366f1; }
-            .footer { margin-top: 32px; color: #555; font-size: 0.8rem; }
-            .footer a { color: #6366f1; text-decoration: none; }
-          </style></head><body>
-          <div class="card">
-            <h1><span>Open</span>LLM</h1>
-            <p class="version">v${process.env.VERSION || '1.0.0'} — Running on GitHub Actions</p>
-            <p class="desc">Claude Code opened to any LLM. Use OpenAI, Gemini, DeepSeek, Ollama, and 200+ models with the same powerful coding agent interface.</p>
-            <div class="providers">
-              <span class="provider">OpenAI</span>
-              <span class="provider">Anthropic</span>
-              <span class="provider">Gemini</span>
-              <span class="provider">Ollama</span>
-              <span class="provider">DeepSeek</span>
-              <span class="provider">Groq</span>
-              <span class="provider">Together</span>
-              <span class="provider">Fireworks</span>
-            </div>
-            <div class="install">npx @rachelma/openllm</div>
-            <p class="footer">
-              <a href="/health">Health</a> &middot;
-              <a href="https://github.com/${process.env.GITHUB_REPOSITORY || 'RachEma-ux/openllm'}">GitHub</a> &middot;
-              <a href="https://github.com/${process.env.GITHUB_REPOSITORY || 'RachEma-ux/openllm'}/releases">Releases</a>
-            </p>
-          </div></body></html>`);
-              return;
-            }
-
-            res.writeHead(404, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Not found' }));
-          });
-
-          server.listen(PORT, () => {
-            console.log('OpenLLM server running on port ' + PORT);
-          });
-          SERVEREOF
-
-          VERSION="${{ steps.version.outputs.VERSION }}" \
-          GITHUB_REPOSITORY="${{ github.repository }}" \
-          node server.mjs > server.log 2>&1 &
+          # ── Start the real web UI server (node-server.ts) on port 3000 ──
+          cd "$GITHUB_WORKSPACE"
+          OPENLLM_WEB_PORT=3000 \
+          OPENLLM_PROVIDER="$PROVIDER" \
+            npx tsx src/web/node-server.ts > server.log 2>&1 &
           SERVER_PID=$!
 
-          # Wait for health
+          # ── Wait for health ──
           echo "Waiting for server..."
           HEALTH_OK="false"
-          for attempt in $(seq 1 12); do
-            if curl -fsS http://localhost:3000/health > /dev/null 2>&1; then
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://localhost:3000/api/health > /dev/null 2>&1; then
               HEALTH_OK="true"
               echo "Health check passed on attempt $attempt"
               break
@@ -418,7 +346,10 @@ jobs:
             exit 1
           fi
 
-          # Start tunnel
+          echo "Server healthy! Checking providers..."
+          curl -s http://localhost:3000/api/providers | jq .
+
+          # ── Start Cloudflare tunnel ──
           echo "Starting Cloudflare tunnel..."
           "$GITHUB_WORKSPACE/cloudflared" tunnel --url http://localhost:3000 2>&1 | tee tunnel.log &
           TUNNEL_PID=$!
@@ -444,15 +375,16 @@ jobs:
           echo "  DEPLOYMENT COMPLETE!"
           echo "============================================"
           echo ""
-          echo "  Version: v${VERSION}"
-          echo "  URL: $TUNNEL_URL"
+          echo "  Version:  v${VERSION}"
+          echo "  URL:      $TUNNEL_URL"
           echo "  Provider: $PROVIDER"
+          echo "  UI:       Home + Chat (WebSocket streaming)"
           echo "  Duration: ${{ github.event.inputs.duration }} minutes"
           echo "============================================"
 
           echo "$TUNNEL_URL" > "$GITHUB_WORKSPACE/app_url.txt"
 
-          # Update Gist
+          # ── Update Gist ──
           GIST_ID="${{ vars.TUNNEL_GIST_ID }}"
           GIST_TOKEN="${{ secrets.GIST_TOKEN }}"
 
@@ -476,11 +408,12 @@ jobs:
               -d "$PAYLOAD" > /dev/null && echo "Gist updated" || echo "Gist update failed"
           fi
 
-          # Keep running
+          # ── Keep running for duration ──
           DURATION_SECONDS=$(( ${{ github.event.inputs.duration }} * 60 ))
+          echo "Serving for ${DURATION_SECONDS}s..."
           sleep $DURATION_SECONDS
 
-          # Cleanup
+          # ── Cleanup ──
           kill $SERVER_PID 2>/dev/null || true
           kill $TUNNEL_PID 2>/dev/null || true
 
