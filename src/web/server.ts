@@ -158,6 +158,7 @@ export async function startWebServer(
       : 5000)
 
   const bridge = new WebSocketBridge(options.onMessage)
+  options.onBridgeReady?.(bridge)
 
   const server = Bun.serve<WSData>({
     port,

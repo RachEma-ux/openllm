@@ -15,10 +15,15 @@ export type WebServerOptions = {
   port?: number
   /**
    * Callback invoked when the client sends a user message.
-   * Returns the assistant's full reply (streaming tokens are emitted
-   * separately via the bridge).
+   * Returns the assistant's full reply, or null if the engine handled
+   * all streaming directly (bridge skips its own token+done emit).
    */
-  onMessage: (msg: string) => Promise<string>
+  onMessage: (msg: string) => Promise<string | null>
+  /**
+   * Called after the WebSocketBridge is created, allowing the engine
+   * to register itself for direct streaming access.
+   */
+  onBridgeReady?: (bridge: import('./ws-bridge.js').WebSocketBridge) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -45,7 +50,7 @@ export type SessionInfo = {
 export type ClientMessage =
   | { type: 'message'; content: string }
   | { type: 'cancel' }
-  | { type: 'permission_response'; allowed: boolean }
+  | { type: 'permission_response'; id: string; allowed: boolean }
 
 // ---------------------------------------------------------------------------
 // WebSocket protocol: server -> client
@@ -58,12 +63,14 @@ export type ServerTokenMessage = {
 
 export type ServerToolUseMessage = {
   type: 'tool_use'
+  id: string
   tool: string
   input: Record<string, unknown>
 }
 
 export type ServerToolResultMessage = {
   type: 'tool_result'
+  id: string
   tool: string
   output: string
 }
@@ -84,6 +91,7 @@ export type ServerErrorMessage = {
 
 export type ServerPermissionRequestMessage = {
   type: 'permission_request'
+  id: string
   tool: string
   input: Record<string, unknown>
 }

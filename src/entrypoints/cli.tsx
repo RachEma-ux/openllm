@@ -241,13 +241,16 @@ async function main(): Promise<void> {
   if (args[0] === 'web' || args[0] === 'serve' || args[0] === '--web') {
     const port = parseInt(args[1] || process.env.OPENLLM_WEB_PORT || '5000', 10);
     console.log(`\x1b[36mOpenLLM Web UI starting on http://localhost:${port}/\x1b[0m`);
+
+    const { initEngine, createMessageHandler } = await import('../web/headless-engine.js');
+    await initEngine();
+    const handler = createMessageHandler();
+
     const { startWebServer } = await import('../web/server.js');
     await startWebServer({
       port,
-      async onMessage(msg: string): Promise<string> {
-        // TODO: wire to QueryEngine when full integration is ready
-        return JSON.stringify({ type: 'token', content: `Echo: ${msg}` });
-      },
+      onMessage: handler.onMessage,
+      onBridgeReady: handler.onBridgeReady,
     });
     return;
   }

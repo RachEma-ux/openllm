@@ -179,22 +179,17 @@ export class WebSocketBridge {
         return
       }
 
-      // Emit the full reply as a single token frame (the QueryEngine
-      // integration layer can also stream individual tokens by calling
-      // broadcast() directly — this path is the simple fallback).
-      if (reply) {
-        this.broadcast({ type: 'token', content: reply })
+      // If reply is null, the engine handled all streaming directly
+      // (emitted tokens + done via bridge methods). Skip our own emit.
+      if (reply !== null) {
+        if (reply) {
+          this.broadcast({ type: 'token', content: reply })
+        }
+        this.broadcast({
+          type: 'done',
+          usage: { input_tokens: 0, output_tokens: 0, cost_usd: 0 },
+        })
       }
-
-      const elapsed = Date.now() - startTime
-      this.broadcast({
-        type: 'done',
-        usage: {
-          input_tokens: 0,
-          output_tokens: 0,
-          cost_usd: 0,
-        },
-      })
     } catch (err: unknown) {
       if (this.activeAbort?.signal.aborted) {
         // Cancelled — swallow
@@ -242,13 +237,19 @@ export class WebSocketBridge {
   }
 
   /** Emit a tool-use notification to all clients. */
-  emitToolUse(tool: string, input: Record<string, unknown>): void {
-    this.broadcast({ type: 'tool_use', tool, input })
+  emitToolUse(id: string, tool: string, input: Record<string, unknown>): void {
+    this.broadcast({ type: 'tool_use', id, tool, input })
   }
 
   /** Emit a tool-result notification to all clients. */
-  emitToolResult(tool: string, output: string): void {
-    this.broadcast({ type: 'tool_result', tool, output })
+  emitToolResult(id: string, tool: string, output: string): void {
+    this.broadcast({ type: 'tool_result', id, tool, output })
+  }
+
+  /** Get the first connected WebSocket client (for permission requests). */
+  getFirstConnection(): { send(data: string): void; data: WSData } | null {
+    const first = this.connections.values().next()
+    return first.done ? null : first.value
   }
 
   /** Emit completion with usage stats. */
