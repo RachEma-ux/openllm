@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OpenLLM</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" async></script>
 <style>
 /* ── Reset & Base ───────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1622,16 +1622,17 @@ html, body {
 
   // ── Event Bindings ──────────────────────────────────────────────
   function bindEvents() {
+    try {
     // Back to home
-    dom.chatBackBtn.addEventListener('click', switchToHome);
+    if (dom.chatBackBtn) dom.chatBackBtn.addEventListener('click', switchToHome);
     // Tab switching (Session / Changes)
-    dom.tabSession.addEventListener('click', () => {
+    if (dom.tabSession) dom.tabSession.addEventListener('click', () => {
       dom.tabSession.classList.add('active');
       dom.tabChanges.classList.remove('active');
       dom.sessionTabContent.style.display = 'flex';
       dom.changesTabContent.style.display = 'none';
     });
-    dom.tabChanges.addEventListener('click', () => {
+    if (dom.tabChanges) dom.tabChanges.addEventListener('click', () => {
       dom.tabChanges.classList.add('active');
       dom.tabSession.classList.remove('active');
       dom.changesTabContent.style.display = 'block';
@@ -1639,19 +1640,19 @@ html, body {
     });
 
     // New session buttons
-    dom.homeNewSessionBtn.addEventListener('click', () => {
+    if (dom.homeNewSessionBtn) dom.homeNewSessionBtn.addEventListener('click', () => {
       state.activeSessionId = 'new_' + Date.now();
       switchToChat('New Session');
     });
-    dom.panelNewSessionBtn.addEventListener('click', () => {
+    if (dom.panelNewSessionBtn) dom.panelNewSessionBtn.addEventListener('click', () => {
       state.activeSessionId = 'new_' + Date.now();
       switchToChat('New Session');
       closePanel();
     });
 
     // Composer
-    dom.msgInput.addEventListener('input', autoResizeInput);
-    dom.msgInput.addEventListener('keydown', (e) => {
+    if (dom.msgInput) dom.msgInput.addEventListener('input', autoResizeInput);
+    if (dom.msgInput) dom.msgInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         if (state.streaming) {
@@ -1662,7 +1663,7 @@ html, body {
       }
     });
 
-    dom.sendBtn.addEventListener('click', () => {
+    if (dom.sendBtn) dom.sendBtn.addEventListener('click', () => {
       if (state.streaming) {
         cancelGeneration();
       } else {
@@ -1671,7 +1672,7 @@ html, body {
     });
 
     // Rail buttons
-    dom.railMenuBtn.addEventListener('click', () => {
+    if (dom.railMenuBtn) dom.railMenuBtn.addEventListener('click', () => {
       if (dom.projectPanel.classList.contains('open')) {
         closePanel();
       } else if (state.projects.length > 0) {
@@ -1679,18 +1680,18 @@ html, body {
       }
     });
 
-    dom.railAddBtn.addEventListener('click', addNewProject);
+    if (dom.railAddBtn) dom.railAddBtn.addEventListener('click', addNewProject);
 
-    dom.railSettingsBtn.addEventListener('click', () => {
+    if (dom.railSettingsBtn) dom.railSettingsBtn.addEventListener('click', () => {
       showToast('Settings panel coming soon');
     });
 
-    dom.railHelpBtn.addEventListener('click', () => {
+    if (dom.railHelpBtn) dom.railHelpBtn.addEventListener('click', () => {
       showToast('OpenLLM v0.1.0 — Local-first LLM development platform');
     });
 
     // Panel close
-    dom.panelCloseBtn.addEventListener('click', closePanel);
+    if (dom.panelCloseBtn) dom.panelCloseBtn.addEventListener('click', closePanel);
 
     // Mobile — rail menu button acts as hamburger
     if (dom.railMenuBtn) {
@@ -1708,6 +1709,7 @@ html, body {
         closePanel();
       });
     }
+    } catch(e) { console.error('BIND ERROR:', e); }
   }
 
   // ── Provider Detection ──────────────────────────────────────────
@@ -1731,6 +1733,7 @@ html, body {
 
   // ── Initialize ──────────────────────────────────────────────────
   function init() {
+    try {
     initDemoData();
     renderProjectAvatars();
     renderHomeSessionList();
@@ -1738,6 +1741,7 @@ html, body {
     connectWS();
     detectProvider();
     updateSendButton();
+    } catch(e) { console.error('INIT ERROR:', e); document.title = 'ERR: ' + e.message; }
 
     // Focus input when chat view is visible
     const observer = new MutationObserver(() => {
