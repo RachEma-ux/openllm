@@ -310,44 +310,83 @@ jobs:
           VERSION="${{ steps.version.outputs.VERSION }}"
           PROVIDER="${{ github.event.inputs.provider }}"
 
-          echo "Starting OpenLLM Web UI with provider: $PROVIDER"
+          echo "Starting OpenLLM Full Agent with provider: $PROVIDER"
 
-          # ── Install tsx for Node.js TypeScript execution ──
-          npm install -g tsx ws
+          # ── Create workspace with git context (QueryEngine needs it) ──
+          mkdir -p /tmp/openllm-workspace
+          cd /tmp/openllm-workspace
+          git init
+          git config user.email "deploy@openllm.dev"
+          git config user.name "OpenLLM Deploy"
+          echo "# OpenLLM Workspace" > README.md
+          git add . && git commit -m "init"
 
-          # ── Configure Ollama if selected ──
+          # ── Configure provider ──
           if [ "$PROVIDER" = "ollama" ]; then
             export OPENAI_BASE_URL="http://localhost:11434/v1"
             export OPENAI_MODEL="llama3.2:3b"
+            export OPENLLM_PROVIDER="ollama"
+            export OPENLLM_MODEL="llama3.2:3b"
+            export OPENLLM_BASE_URL="http://localhost:11434/v1"
+          elif [ "$PROVIDER" = "openai" ]; then
+            export OPENLLM_PROVIDER="openai"
+            export OPENLLM_MODEL="${OPENAI_MODEL:-gpt-4o}"
+          elif [ "$PROVIDER" = "gemini" ]; then
+            export OPENLLM_PROVIDER="gemini"
+            export OPENLLM_MODEL="gemini-2.0-flash"
+            export GOOGLE_API_KEY="$GEMINI_API_KEY"
+          elif [ "$PROVIDER" = "anthropic" ]; then
+            export OPENLLM_PROVIDER="anthropic"
+            export OPENLLM_MODEL="claude-sonnet-4-5-20241022"
           fi
 
-          # ── Start the real web UI server (node-server.ts) on port 3000 ──
+          # ── Start the FULL agent (Bun + QueryEngine + tools) ──
           cd "$GITHUB_WORKSPACE"
+          echo "Launching: node dist/cli.mjs serve 3000"
           OPENLLM_WEB_PORT=3000 \
-          OPENLLM_PROVIDER="$PROVIDER" \
-            npx tsx src/web/node-server.ts > server.log 2>&1 &
+            node dist/cli.mjs serve 3000 > server.log 2>&1 &
           SERVER_PID=$!
 
-          # ── Wait for health ──
-          echo "Waiting for server..."
+          # ── Wait for health (QueryEngine takes longer to init) ──
+          echo "Waiting for full agent to start..."
           HEALTH_OK="false"
-          for attempt in $(seq 1 20); do
+          for attempt in $(seq 1 30); do
             if curl -fsS http://localhost:3000/api/health > /dev/null 2>&1; then
               HEALTH_OK="true"
-              echo "Health check passed on attempt $attempt"
+              echo "Agent healthy on attempt $attempt"
               break
             fi
             sleep 3
           done
 
           if [ "$HEALTH_OK" != "true" ]; then
-            echo "Server did not become healthy"
+            echo "Agent did not become healthy — falling back to node-server..."
             cat server.log || true
-            exit 1
+            kill $SERVER_PID 2>/dev/null || true
+
+            # Fallback: use node-server.ts (chat-only, no tools)
+            npm install -g tsx ws
+            OPENLLM_WEB_PORT=3000 \
+              npx tsx src/web/node-server.ts > server.log 2>&1 &
+            SERVER_PID=$!
+
+            for attempt in $(seq 1 15); do
+              if curl -fsS http://localhost:3000/api/health > /dev/null 2>&1; then
+                echo "Fallback server healthy on attempt $attempt"
+                HEALTH_OK="true"
+                break
+              fi
+              sleep 3
+            done
+
+            if [ "$HEALTH_OK" != "true" ]; then
+              echo "Both servers failed"
+              cat server.log || true
+              exit 1
+            fi
           fi
 
-          echo "Server healthy! Checking providers..."
-          curl -s http://localhost:3000/api/providers | jq .
+          echo "Server healthy!"
 
           # ── Start Cloudflare tunnel ──
           echo "Starting Cloudflare tunnel..."
