@@ -179,7 +179,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
         <p>Local-first LLM development platform</p>
         <div class="status-row">
           <span class="badge" id="status-badge">&#9679; Offline</span>
-          <span class="badge" id="provider-badge">&#9679; No provider</span>
+          <span class="badge" id="provider-badge">&#9679; openai</span>
         </div>
       </div>
       <div class="home-cards">
@@ -242,9 +242,34 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
         <div class="toolbar">
           <div class="tool-item">Plan <span style="font-size:10px;opacity:.6">&#9662;</span></div>
           <span class="tool-sep">|</span>
-          <div class="tool-item"><span class="model-badge">O</span> Default <span style="font-size:10px;opacity:.6">&#9662;</span></div>
+          <div class="tool-item" style="position:relative">
+            <span class="model-badge" id="provider-icon">O</span>
+            <select id="provider-sel" onchange="selectProvider(this.value)" style="background:none;border:none;color:var(--dim);font-size:13px;font-family:inherit;outline:none;cursor:pointer;appearance:none;-webkit-appearance:none;padding-right:14px">
+              <option value="ollama">Ollama</option>
+              <option value="openai" selected>OpenAI</option>
+              <option value="gemini">Gemini</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="codex">Codex (ChatGPT)</option>
+              <option value="github">GitHub Models</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="groq">Groq</option>
+              <option value="together">Together</option>
+              <option value="fireworks">Fireworks</option>
+              <option value="mistral">Mistral</option>
+              <option value="lmstudio">LM Studio</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="bedrock">AWS Bedrock</option>
+              <option value="vertex">Google Vertex</option>
+              <option value="atomic-chat">Atomic Chat</option>
+            </select>
+            <span style="font-size:10px;opacity:.6;pointer-events:none;position:absolute;right:0;top:50%;transform:translateY(-50%)">&#9662;</span>
+          </div>
           <span class="tool-sep">|</span>
-          <div class="tool-item">Code <span style="font-size:10px;opacity:.6">&#9662;</span></div>
+          <div class="tool-item" style="position:relative">
+            <select id="model-sel" onchange="selectModel(this.value)" style="background:none;border:none;color:var(--dim);font-size:13px;font-family:inherit;outline:none;cursor:pointer;appearance:none;-webkit-appearance:none;padding-right:14px">
+            </select>
+            <span style="font-size:10px;opacity:.6;pointer-events:none;position:absolute;right:0;top:50%;transform:translateY(-50%)">&#9662;</span>
+          </div>
           <span class="tok-count" id="tok"></span>
           <div class="tool-shield">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -436,6 +461,50 @@ function permReply(id,allowed,el){
   el.innerHTML=`<div style="font-size:12px;font-weight:600;color:${allowed?'var(--green)':'var(--red)'}">${allowed?'Allowed':'Denied'}</div>`;
 }
 
+/* ── Providers & Models ── */
+const PROVIDERS = {
+  ollama:       {icon:'🦙',badge:'O',models:['llama3.2:3b','llama3.1:8b','qwen2.5-coder:7b','deepseek-coder:6.7b','phi3','mistral','codellama']},
+  openai:       {icon:'',badge:'O',models:['gpt-4o','gpt-4o-mini','gpt-4.1','gpt-4.1-mini','o3-mini']},
+  gemini:       {icon:'',badge:'G',models:['gemini-2.0-flash','gemini-2.5-pro','gemini-2.5-flash']},
+  anthropic:    {icon:'',badge:'A',models:['claude-sonnet-4-5','claude-opus-4','claude-haiku-3-5']},
+  codex:        {icon:'',badge:'C',models:['codexplan','gpt-4o']},
+  github:       {icon:'',badge:'H',models:['openai/gpt-4.1','openai/gpt-4o','meta/llama-3-70b']},
+  deepseek:     {icon:'',badge:'D',models:['deepseek-chat','deepseek-coder','deepseek-reasoner']},
+  groq:         {icon:'',badge:'Q',models:['llama-3.3-70b','mixtral-8x7b','gemma2-9b']},
+  together:     {icon:'',badge:'T',models:['meta-llama/Meta-Llama-3.1-70B','mistralai/Mixtral-8x22B']},
+  fireworks:    {icon:'',badge:'F',models:['llama-v3p1-70b','mixtral-8x22b','qwen2.5-72b']},
+  mistral:      {icon:'',badge:'M',models:['mistral-large','mistral-small','codestral']},
+  lmstudio:     {icon:'',badge:'L',models:['(auto-detect from LM Studio)']},
+  openrouter:   {icon:'',badge:'R',models:['auto','openai/gpt-4o','anthropic/claude-3.5-sonnet']},
+  bedrock:      {icon:'',badge:'B',models:['anthropic.claude-3-5-sonnet','anthropic.claude-3-haiku']},
+  vertex:       {icon:'',badge:'V',models:['claude-3-5-sonnet@20241022','gemini-2.0-flash']},
+  'atomic-chat':{icon:'',badge:'⚛',models:['(auto-detect local)']},
+};
+let currentProvider = 'openai';
+let currentModel = 'gpt-4o';
+
+function selectProvider(prov){
+  currentProvider = prov;
+  const p = PROVIDERS[prov];
+  if(!p) return;
+  const badge = $('#provider-icon');
+  if(badge) badge.textContent = p.badge;
+  const sel = $('#model-sel');
+  if(sel){
+    sel.innerHTML = '';
+    p.models.forEach((m,i)=>{
+      const opt = document.createElement('option');
+      opt.value = m; opt.textContent = m;
+      if(i===0) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    currentModel = p.models[0];
+  }
+  const provBadge = $('#provider-badge');
+  if(provBadge) provBadge.textContent = '● ' + prov;
+}
+function selectModel(m){ currentModel = m; }
+
 function addProject(){
   const name=prompt('Project name:');
   if(!name)return;
@@ -446,6 +515,7 @@ function addProject(){
 /* ── Boot ── */
 renderAvatars();
 renderHome();
+selectProvider('openai');
 connectWS();
 </script>
 </body>
