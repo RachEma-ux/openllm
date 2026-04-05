@@ -1027,7 +1027,7 @@ html, body {
     sendBtn: $('#send-btn'),
     tokenCount: $('#token-count'),
     toastContainer: $('#toast-container'),
-    hamburgerBtn: $('#hamburger-btn'),
+    // hamburgerBtn removed — railMenuBtn used instead
     mobileOverlay: $('#mobile-overlay'),
     railMenuBtn: $('#rail-menu-btn'),
     railAddBtn: $('#rail-add-btn'),
@@ -1088,7 +1088,7 @@ html, body {
       state.ws = new WebSocket(url);
     } catch (e) {
       updateConnectionStatus(false);
-      scheduleReconnect();
+      // Don't spam reconnect on static server (no WS support)
       return;
     }
 
@@ -1126,6 +1126,8 @@ html, body {
 
   function scheduleReconnect() {
     if (state.reconnectTimer) return;
+    state.reconnectAttempts = (state.reconnectAttempts || 0) + 1;
+    if (state.reconnectAttempts > 5) return; // stop after 5 attempts
     state.reconnectTimer = setTimeout(() => {
       state.reconnectTimer = null;
       state.reconnectDelay = Math.min(state.reconnectDelay * 1.5, 15000);
@@ -1689,22 +1691,22 @@ html, body {
     // Panel close
     dom.panelCloseBtn.addEventListener('click', closePanel);
 
-    // Mobile
-    dom.hamburgerBtn.addEventListener('click', () => {
-      if (dom.sidebarRail.classList.contains('mobile-open')) {
+    // Mobile — rail menu button acts as hamburger
+    if (dom.railMenuBtn) {
+      dom.railMenuBtn.addEventListener('click', () => {
+        if (dom.sidebarRail.classList.contains('mobile-open')) {
+          closeMobileSidebar();
+        } else {
+          openMobileSidebar();
+        }
+      });
+    }
+    if (dom.mobileOverlay) {
+      dom.mobileOverlay.addEventListener('click', () => {
         closeMobileSidebar();
-      } else {
-        openMobileSidebar();
-      }
-    });
-    dom.mobileOverlay.addEventListener('click', () => {
-      closeMobileSidebar();
-      closePanel();
-    });
-
-    // Model/mode selects (for future use)
-    $('#model-select').addEventListener('change', () => {});
-    $('#mode-select').addEventListener('change', () => {});
+        closePanel();
+      });
+    }
   }
 
   // ── Provider Detection ──────────────────────────────────────────
