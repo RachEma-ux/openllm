@@ -957,6 +957,7 @@ html, body {
           </div>
           <span class="toolbar-sep">|</span>
           <div class="toolbar-item">Code <span style="font-size:10px;opacity:0.6">&#9662;</span></div>
+          <span class="token-count" id="token-count"></span>
           <div class="toolbar-shield" title="Permissions">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
@@ -1242,7 +1243,7 @@ html, body {
     if (msg.usage) {
       const { input_tokens, output_tokens } = msg.usage;
       if (input_tokens || output_tokens) {
-        dom.tokenCount.textContent = `${(input_tokens || 0).toLocaleString()} in / ${(output_tokens || 0).toLocaleString()} out`;
+        if (dom.tokenCount) dom.tokenCount.textContent = `${(input_tokens || 0).toLocaleString()} in / ${(output_tokens || 0).toLocaleString()} out`;
       }
     }
     updateSendButton();
@@ -1450,7 +1451,7 @@ html, body {
     state.streamBuffer = '';
     state.streaming = false;
     state.currentToolCards = {};
-    dom.tokenCount.textContent = '';
+    if (dom.tokenCount) dom.tokenCount.textContent = '';
     dom.msgInput.focus();
     updateSendButton();
   }
