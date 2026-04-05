@@ -359,37 +359,125 @@ html, body {
 }
 #chat-view.hidden { display: none; }
 
-/* Chat header */
-.chat-header {
+/* App Header (hamburger + icons) */
+.chat-app-header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  padding: 10px 16px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
-  gap: 12px;
   flex-shrink: 0;
 }
-.back-btn {
+.chat-hamburger {
   width: 32px; height: 32px;
+  display: flex; flex-direction: column; justify-content: center;
+  gap: 4px; padding: 4px; cursor: pointer; background: none; border: none;
+}
+.chat-hamburger span {
+  display: block; height: 2px; background: var(--text-dim);
+  border-radius: 2px; width: 20px;
+}
+.chat-header-actions {
+  display: flex; align-items: center; gap: 8px;
+}
+.chat-header-icon {
+  width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim); border-radius: 6px; position: relative; cursor: pointer;
+}
+.chat-header-icon .status-dot-green {
+  position: absolute; top: 6px; right: 6px; width: 6px; height: 6px;
+  background: var(--green); border-radius: 50%;
+}
+
+/* Tab Bar (Session / Changes) */
+.chat-tab-bar { display: flex; flex-shrink: 0; }
+.chat-tab {
+  flex: 1; text-align: center; padding: 10px 0; font-size: 15px;
+  font-weight: 500; color: var(--text-muted); cursor: pointer;
+  border-bottom: 2px solid transparent; transition: all 0.15s;
+}
+.chat-tab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
+
+/* Session title row */
+.session-title-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 14px;
+}
+.session-title-text {
+  flex: 1; font-size: 15px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.session-title-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.session-spinner {
+  width: 16px; height: 16px; border: 2px solid var(--border);
+  border-top-color: var(--text-dim); border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.session-dots { color: var(--text-dim); font-size: 18px; letter-spacing: 1px; cursor: pointer; }
+
+/* Task items */
+.task-item { display: flex; gap: 12px; padding: 7px 0; align-items: flex-start; }
+.task-num { font-size: 14px; color: var(--text-muted); min-width: 20px; text-align: right; padding-top: 1px; flex-shrink: 0; }
+.task-label { font-size: 14px; line-height: 1.5; }
+.badge-p1 { font-weight: 700; color: var(--text); }
+.badge-p2 { font-weight: 700; color: var(--text-dim); }
+
+/* Clear button */
+.clear-btn {
+  background: #1c1c1c; border: 1px solid var(--border); color: var(--text);
+  font-size: 14px; padding: 10px 18px; border-radius: 8px; cursor: pointer;
+  transition: background 150ms;
+}
+.clear-btn:hover { background: #252525; }
+
+/* Changes tab content */
+.changes-content { padding: 16px 14px; color: var(--text-dim); font-size: 14px; }
+
+/* Composer (OpenCode style) */
+.chat-composer {
+  flex-shrink: 0; background: var(--bg); padding: 8px 12px 12px;
+  border-top: 1px solid var(--border);
+}
+.composer-box {
+  background: #1a1a1a; border: 1px solid var(--border); border-radius: 14px;
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;
+}
+.composer-box textarea {
+  background: none; border: none; outline: none; color: var(--text);
+  font-size: 15px; resize: none; width: 100%; font-family: inherit;
+  line-height: 1.4; min-height: 22px; caret-color: var(--text);
+}
+.composer-row {
+  display: flex; justify-content: space-between; align-items: center;
+}
+.composer-attach {
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim); font-size: 20px; font-weight: 300; cursor: pointer;
+}
+.composer-send {
+  width: 34px; height: 34px; background: var(--text-dim); border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
-  border: none; background: transparent; color: var(--text-dim);
-  border-radius: 6px; cursor: pointer; font-size: 18px;
+  cursor: pointer; border: none; transition: background 0.15s;
 }
-.back-btn:hover { background: #1a1a1a; color: var(--text); }
-.chat-header-title {
-  font-size: 14px;
-  font-weight: 600;
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.composer-send:hover { background: var(--text); }
+.composer-send svg { stroke: white; }
+
+/* Bottom toolbar (Plan | Model | Mode | Shield) */
+.bottom-toolbar {
+  display: flex; align-items: center; padding: 0 2px;
 }
-.chat-header-status {
-  font-size: 11px;
-  color: var(--text-dim);
-  padding: 2px 8px;
-  border-radius: 99px;
-  background: #1a1a1a;
+.toolbar-item {
+  padding: 4px 8px; font-size: 13px; color: var(--text-dim);
+  border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 4px;
 }
+.toolbar-item:hover { background: #1a1a1a; }
+.toolbar-sep { color: var(--border); font-size: 16px; padding: 0 2px; }
+.model-badge {
+  width: 14px; height: 14px; background: #e8d5b0; border-radius: 3px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 8px; color: #5a3e00; font-weight: 900;
+}
+.toolbar-shield { margin-left: auto; color: var(--text-muted); padding: 4px 8px; cursor: pointer; }
 
 /* Messages area */
 #messages {
@@ -626,28 +714,7 @@ html, body {
 }
 
 /* ── Composer ───────────────────────────────────────────────────── */
-#composer {
-  border-top: 1px solid var(--border);
-  padding: 12px 16px;
-  flex-shrink: 0;
-}
-#composer-inner {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  transition: border-color 150ms;
-}
-#composer-inner:focus-within { border-color: var(--accent); }
-
-#composer-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
+/* Old composer overridden by .chat-composer / .composer-box above */
 
 #msg-input {
   flex: 1;
@@ -655,53 +722,19 @@ html, body {
   border: none;
   color: var(--text);
   font-family: var(--font);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 15px;
+  line-height: 1.4;
   resize: none;
   outline: none;
   max-height: 160px;
   min-height: 22px;
   overflow-y: auto;
+  width: 100%;
+  caret-color: var(--text);
 }
 #msg-input::placeholder { color: var(--text-muted); }
 
-#send-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  border: none;
-  background: var(--accent);
-  color: #fff;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  flex-shrink: 0;
-  transition: background 150ms, opacity 150ms;
-}
-#send-btn:hover { background: var(--accent-hover); }
-#send-btn:disabled { opacity: 0.4; cursor: default; }
-#send-btn.cancel-mode { background: var(--red); }
-
-#composer-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 2px;
-}
-
-.meta-select {
-  background: #1a1a1a;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-dim);
-  font-size: 11px;
-  padding: 3px 8px;
-  outline: none;
-  cursor: pointer;
-}
-.meta-select:hover { border-color: #444; }
+#send-btn.cancel-mode .composer-send { background: var(--red); }
 
 .token-count {
   font-size: 11px;
@@ -855,34 +888,77 @@ html, body {
       <button class="new-session-btn" id="home-new-session-btn">New Session</button>
     </div>
 
-    <!-- CHAT VIEW -->
+    <!-- CHAT VIEW (OpenCode Chat template) -->
     <div id="chat-view" class="hidden">
-      <div class="chat-header">
-        <button class="back-btn" id="back-btn" title="Back to home">&#8592;</button>
-        <span class="chat-header-title" id="chat-title">New Session</span>
-        <span class="chat-header-status" id="chat-status">ready</span>
-      </div>
-      <div id="messages"></div>
-      <div id="composer">
-        <div id="composer-inner">
-          <div id="composer-row">
-            <textarea id="msg-input" rows="1" placeholder="Ask anything..."></textarea>
-            <button id="send-btn" title="Send" aria-label="Send">&#10148;</button>
+
+      <!-- App Header -->
+      <div class="chat-app-header">
+        <button class="chat-hamburger" id="chat-back-btn" title="Back">
+          <span></span><span></span><span></span>
+        </button>
+        <div class="chat-header-actions">
+          <div class="chat-header-icon" title="Grid">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            <span class="status-dot-green"></span>
           </div>
-          <div id="composer-meta">
-            <select class="meta-select" id="model-select">
-              <option value="default">Default Model</option>
-              <option value="claude-sonnet">Claude Sonnet</option>
-              <option value="claude-opus">Claude Opus</option>
-              <option value="gpt-4o">GPT-4o</option>
-              <option value="local">Local Model</option>
-            </select>
-            <select class="meta-select" id="mode-select">
-              <option value="code">Code</option>
-              <option value="chat">Chat</option>
-              <option value="agent">Agent</option>
-            </select>
-            <span class="token-count" id="token-count"></span>
+          <div class="chat-header-icon" title="Terminal">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab Bar -->
+      <div class="chat-tab-bar">
+        <div class="chat-tab active" data-tab="session" id="tab-session">Session</div>
+        <div class="chat-tab" data-tab="changes" id="tab-changes">Changes</div>
+      </div>
+
+      <!-- Session Tab Content -->
+      <div id="session-tab-content" style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+        <!-- Session title + spinner -->
+        <div style="padding: 16px 14px 0;">
+          <div class="session-title-row">
+            <span class="session-title-text" id="chat-title">New Session</span>
+            <div class="session-title-actions">
+              <div class="session-spinner" id="chat-spinner" style="display:none;"></div>
+              <span class="session-dots">···</span>
+            </div>
+          </div>
+        </div>
+        <!-- Messages -->
+        <div id="messages"></div>
+      </div>
+
+      <!-- Changes Tab Content -->
+      <div id="changes-tab-content" class="changes-content" style="flex:1; display:none; overflow-y:auto;">
+        <p style="color:var(--text-muted); padding: 40px 0; text-align:center;">No changes in this session yet.</p>
+      </div>
+
+      <!-- Composer (OpenCode style) -->
+      <div class="chat-composer">
+        <div class="composer-box">
+          <textarea id="msg-input" rows="1" placeholder="Ask anything..."></textarea>
+          <div class="composer-row">
+            <div class="composer-attach" title="Attach">+</div>
+            <button class="composer-send" id="send-btn" title="Send">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5">
+                <line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="bottom-toolbar">
+          <div class="toolbar-item">Plan <span style="font-size:10px;opacity:0.6">&#9662;</span></div>
+          <span class="toolbar-sep">|</span>
+          <div class="toolbar-item">
+            <span class="model-badge">O</span>
+            <span id="toolbar-model">Default</span>
+            <span style="font-size:10px;opacity:0.6">&#9662;</span>
+          </div>
+          <span class="toolbar-sep">|</span>
+          <div class="toolbar-item">Code <span style="font-size:10px;opacity:0.6">&#9662;</span></div>
+          <div class="toolbar-shield" title="Permissions">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
         </div>
       </div>
@@ -940,8 +1016,13 @@ html, body {
     homeNewSessionBtn: $('#home-new-session-btn'),
     messages: $('#messages'),
     chatTitle: $('#chat-title'),
-    chatStatus: $('#chat-status'),
-    backBtn: $('#back-btn'),
+    chatSpinner: $('#chat-spinner'),
+    chatBackBtn: $('#chat-back-btn'),
+    tabSession: $('#tab-session'),
+    tabChanges: $('#tab-changes'),
+    sessionTabContent: $('#session-tab-content'),
+    changesTabContent: $('#changes-tab-content'),
+    toolbarModel: $('#toolbar-model'),
     msgInput: $('#msg-input'),
     sendBtn: $('#send-btn'),
     tokenCount: $('#token-count'),
@@ -1061,10 +1142,9 @@ html, body {
   function updateConnectionStatus(connected) {
     if (connected) {
       dom.statusText.textContent = 'Connected';
-      dom.chatStatus.textContent = 'ready';
+      if (dom.chatSpinner) dom.chatSpinner.style.display = 'none';
     } else {
       dom.statusText.textContent = 'Reconnecting...';
-      dom.chatStatus.textContent = 'disconnected';
     }
   }
 
@@ -1100,7 +1180,7 @@ html, body {
       state.streamBuffer = '';
       removeTypingIndicator();
       appendBotMessage('');
-      dom.chatStatus.textContent = 'generating...';
+      if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'generating...';
     }
     state.streamBuffer += content;
     updateStreamingMessage(state.streamBuffer);
@@ -1120,7 +1200,7 @@ html, body {
     dom.messages.appendChild(card);
     state.currentToolCards[toolId] = card;
     scrollToBottom();
-    dom.chatStatus.textContent = `running ${msg.tool}...`;
+    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = `running ${msg.tool}...`;
   }
 
   function handleToolResult(msg) {
@@ -1144,7 +1224,7 @@ html, body {
         outputEl.textContent = msg.output.slice(0, 5000);
       }
     }
-    dom.chatStatus.textContent = 'generating...';
+    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'generating...';
     scrollToBottom();
   }
 
@@ -1155,7 +1235,7 @@ html, body {
     state.streaming = false;
     state.streamBuffer = '';
     removeTypingIndicator();
-    dom.chatStatus.textContent = 'ready';
+    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'ready';
 
     if (msg.usage) {
       const { input_tokens, output_tokens } = msg.usage;
@@ -1171,7 +1251,7 @@ html, body {
     state.streaming = false;
     state.streamBuffer = '';
     removeTypingIndicator();
-    dom.chatStatus.textContent = 'error';
+    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'error';
     showToast(msg.message || 'An error occurred');
     updateSendButton();
   }
@@ -1183,7 +1263,7 @@ html, body {
       state.streaming = false;
       state.streamBuffer = '';
     }
-    dom.chatStatus.textContent = 'awaiting permission';
+    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'awaiting permission';
 
     const card = createPermissionCard(msg);
     dom.messages.appendChild(card);
@@ -1317,13 +1397,13 @@ html, body {
     allowBtn.addEventListener('click', () => {
       sendWS({ type: 'permission_response', id: permId, allowed: true });
       actionsDiv.innerHTML = '<div class="perm-resolved allowed">&#10003; Allowed</div>';
-      dom.chatStatus.textContent = 'generating...';
+      if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'generating...';
     });
 
     denyBtn.addEventListener('click', () => {
       sendWS({ type: 'permission_response', id: permId, allowed: false });
       actionsDiv.innerHTML = '<div class="perm-resolved denied">&#10005; Denied</div>';
-      dom.chatStatus.textContent = 'ready';
+      if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'ready';
     });
 
     return card;
@@ -1362,7 +1442,7 @@ html, body {
     dom.homeView.classList.add('hidden');
     dom.chatView.classList.remove('hidden');
     dom.chatTitle.textContent = sessionTitle || 'New Session';
-    dom.chatStatus.textContent = state.connected ? 'ready' : 'disconnected';
+    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = state.connected ? 'ready' : 'disconnected';
     dom.messages.innerHTML = '';
     state.messages = [];
     state.streamBuffer = '';
@@ -1383,7 +1463,7 @@ html, body {
     dom.msgInput.value = '';
     autoResizeInput();
     showTypingIndicator();
-    dom.chatStatus.textContent = 'thinking...';
+    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'thinking...';
     updateSendButton();
   }
 
@@ -1393,11 +1473,11 @@ html, body {
     state.streamBuffer = '';
     finalizeBotMessage();
     removeTypingIndicator();
-    dom.chatStatus.textContent = 'cancelled';
+    if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'cancelled';
     updateSendButton();
     setTimeout(() => {
-      if (dom.chatStatus.textContent === 'cancelled') {
-        dom.chatStatus.textContent = 'ready';
+      if (if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status === 'cancelled') {
+        if (dom.chatSpinner) dom.chatSpinner.style.display = 'inline-block'; // status = 'ready';
       }
     }, 2000);
   }
@@ -1540,7 +1620,20 @@ html, body {
   // ── Event Bindings ──────────────────────────────────────────────
   function bindEvents() {
     // Back to home
-    dom.backBtn.addEventListener('click', switchToHome);
+    dom.chatBackBtn.addEventListener('click', switchToHome);
+    // Tab switching (Session / Changes)
+    dom.tabSession.addEventListener('click', () => {
+      dom.tabSession.classList.add('active');
+      dom.tabChanges.classList.remove('active');
+      dom.sessionTabContent.style.display = 'flex';
+      dom.changesTabContent.style.display = 'none';
+    });
+    dom.tabChanges.addEventListener('click', () => {
+      dom.tabChanges.classList.add('active');
+      dom.tabSession.classList.remove('active');
+      dom.changesTabContent.style.display = 'block';
+      dom.sessionTabContent.style.display = 'none';
+    });
 
     // New session buttons
     dom.homeNewSessionBtn.addEventListener('click', () => {
