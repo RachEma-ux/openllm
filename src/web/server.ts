@@ -143,7 +143,7 @@ function generateConnectionId(): string {
 /**
  * Start the OpenLLM web server.
  *
- * @param options.port    - TCP port (default: env OPENLLM_WEB_PORT or 3000)
+ * @param options.port    - TCP port (default: env OPENLLM_WEB_PORT or 5000)
  * @param options.onMessage - Callback that receives user messages and returns
  *                            the assistant reply. This is the integration
  *                            point with the QueryEngine.
@@ -155,7 +155,7 @@ export async function startWebServer(
     options.port ??
     (process.env.OPENLLM_WEB_PORT
       ? parseInt(process.env.OPENLLM_WEB_PORT, 10)
-      : 3000)
+      : 5000)
 
   const bridge = new WebSocketBridge(options.onMessage)
 
