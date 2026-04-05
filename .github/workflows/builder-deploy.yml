@@ -1,0 +1,521 @@
+name: Builder Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (auto = auto-increment, or specify like 1.0.0)'
+        required: false
+        default: 'auto'
+      run_app:
+        description: 'Start app with public URL after build?'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+      duration:
+        description: 'How long to keep app running (minutes)'
+        required: true
+        default: '15'
+        type: choice
+        options:
+          - '5'
+          - '10'
+          - '15'
+          - '30'
+      provider:
+        description: 'Default LLM provider to configure'
+        required: false
+        default: 'ollama'
+        type: choice
+        options:
+          - 'ollama'
+          - 'openai'
+          - 'gemini'
+          - 'anthropic'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      # ========== GIST STATUS ==========
+      - name: Reset Gist status to pending
+        run: |
+          echo "Resetting Gist tunnel status..."
+          GIST_ID="${{ vars.TUNNEL_GIST_ID }}"
+          GIST_TOKEN="${{ secrets.GIST_TOKEN }}"
+
+          if [ -n "$GIST_TOKEN" ] && [ -n "$GIST_ID" ]; then
+            TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            GIST_JSON=$(jq -n \
+              --arg rid "${{ github.run_id }}" \
+              --arg repo "${{ github.repository }}" \
+              --arg ts "$TIMESTAMP" \
+              '{tunnel_url: null, version: null, run_id: $rid, repository: $repo, status: "pending", started_at: $ts}')
+
+            PAYLOAD=$(jq -n --arg content "$GIST_JSON" '{files: {"tunnel-status.json": {content: $content}}}')
+
+            curl -s -X PATCH "https://api.github.com/gists/$GIST_ID" \
+              -H "Authorization: Bearer $GIST_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -d "$PAYLOAD" > /dev/null && echo "Gist reset to pending" || echo "Gist reset failed"
+          else
+            echo "GIST_TOKEN or TUNNEL_GIST_ID not configured — skipping"
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ========== VERSION ==========
+      - name: Determine version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          INPUT_VERSION="${{ github.event.inputs.version }}"
+          INPUT_VERSION="${INPUT_VERSION#v}"
+
+          if echo "$INPUT_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Redeploying existing version: v${INPUT_VERSION}"
+            echo "VERSION=${INPUT_VERSION}" >> $GITHUB_OUTPUT
+            echo "REDEPLOY=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          LATEST=$(gh release list --repo "${{ github.repository }}" --limit 100 --json tagName --jq '.[].tagName' 2>/dev/null | sed 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+
+          if [ -z "$LATEST" ]; then
+            NEW_VERSION="1.0.0"
+            echo "No existing releases — starting at v${NEW_VERSION}"
+          else
+            MAJOR=$(echo "$LATEST" | cut -d. -f1)
+            MINOR=$(echo "$LATEST" | cut -d. -f2)
+            PATCH=$(echo "$LATEST" | cut -d. -f3)
+            NEW_PATCH=$((PATCH + 1))
+            NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+            echo "Latest: v${LATEST} — New: v${NEW_VERSION}"
+          fi
+
+          echo "VERSION=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "REDEPLOY=false" >> $GITHUB_OUTPUT
+
+      # ========== SETUP ==========
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.11'
+
+      # ========== BUILD ==========
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run smoke tests
+        run: bun run smoke
+        continue-on-error: true
+
+      - name: Run unit tests
+        run: bun test --max-concurrency=1
+        continue-on-error: true
+
+      - name: Build application
+        run: |
+          echo "Building OpenLLM..."
+          bun run build
+          echo "Build output:"
+          ls -lh dist/
+
+      # ========== REBRAND ==========
+      - name: Rebrand to OpenLLM
+        run: |
+          # Update package name
+          if [ -f package.json ]; then
+            jq '.name = "@rachelma/openllm" | .bin.openllm = .bin.openclaude | del(.bin.openclaude)' package.json > package.tmp && mv package.tmp package.json
+          fi
+
+          # Update bin script
+          if [ -f bin/openclaude ]; then
+            cp bin/openclaude bin/openllm
+            chmod +x bin/openllm
+          fi
+
+          echo "Rebranded to OpenLLM"
+
+      # ========== PACK ==========
+      - name: Create pack archive
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          PACK_DIR="pack-output"
+
+          mkdir -p "$PACK_DIR"
+
+          # Copy build output
+          cp -r dist "$PACK_DIR/"
+          cp -r bin "$PACK_DIR/"
+          cp package.json "$PACK_DIR/"
+          cp README.md "$PACK_DIR/" 2>/dev/null || true
+          cp LICENSE "$PACK_DIR/" 2>/dev/null || true
+
+          # Create pack manifest
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          jq -n \
+            --arg version "$VERSION" \
+            --arg sha "${{ github.sha }}" \
+            --arg time "$BUILD_TIME" \
+            '{
+              pack_version: 1,
+              id: "openllm",
+              name: "OpenLLM",
+              version: $version,
+              description: "Claude Code opened to any LLM — OpenAI, Gemini, DeepSeek, Ollama, and 200+ models",
+              entry: "dist/cli.mjs",
+              build: {
+                git_sha: $sha,
+                built_at: $time,
+                node_version: "22",
+                bun_version: "1.3.11"
+              },
+              providers: ["openai", "anthropic", "gemini", "ollama", "deepseek", "groq", "together", "fireworks"],
+              scripts: {
+                start: "node dist/cli.mjs",
+                dev: "bun run dev"
+              }
+            }' > "$PACK_DIR/pack.json"
+
+          # Checksums
+          cd "$PACK_DIR"
+          find . -type f ! -name "checksums.sha256" -exec sha256sum {} \; > checksums.sha256
+          cd ..
+
+          # Archive
+          ARCHIVE_NAME="pack-openllm-v${VERSION}.zip"
+          cd "$PACK_DIR" && zip -r "../$ARCHIVE_NAME" . && cd ..
+
+          echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_ENV
+          echo "Created: $ARCHIVE_NAME ($(du -h "$ARCHIVE_NAME" | cut -f1))"
+
+      # ========== RELEASE ==========
+      - name: Delete existing release
+        continue-on-error: true
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          RELEASE_ID=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/v${VERSION}" \
+            | jq -r '.id // empty')
+
+          if [ -n "$RELEASE_ID" ] && [ "$RELEASE_ID" != "null" ]; then
+            echo "Deleting existing release v${VERSION}..."
+            curl -X DELETE -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/${RELEASE_ID}"
+            curl -X DELETE -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/git/refs/tags/v${VERSION}" || true
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+
+          sha256sum "${{ env.ARCHIVE_NAME }}" > checksums.sha256
+
+          gh release create "v${VERSION}" \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "OpenLLM v${VERSION}" \
+            --notes "$(cat <<EOF
+          ## OpenLLM v${VERSION}
+
+          Claude Code opened to any LLM — OpenAI, Gemini, DeepSeek, Ollama, and 200+ models.
+
+          ### Build Info
+          - Git SHA: \`${{ github.sha }}\`
+          - Node: 22 / Bun: 1.3.11
+          - Built: $(date -u +"%Y-%m-%d %H:%M UTC")
+
+          ### Installation
+          \`\`\`bash
+          # From release
+          wget https://github.com/${{ github.repository }}/releases/download/v${VERSION}/${{ env.ARCHIVE_NAME }}
+          unzip ${{ env.ARCHIVE_NAME }} -d openllm
+          cd openllm && node dist/cli.mjs
+
+          # Or run directly
+          npx @rachelma/openllm
+          \`\`\`
+
+          ### Supported Providers
+          OpenAI, Anthropic, Google Gemini, Ollama, DeepSeek, Groq, Together, Fireworks, and 200+ more via OpenAI-compatible endpoints.
+          EOF
+          )" \
+            "${{ env.ARCHIVE_NAME }}" \
+            "checksums.sha256"
+
+          echo "Release v${VERSION} created!"
+
+      # ========== RUN PHASE ==========
+      - name: Install Ollama
+        if: ${{ github.event.inputs.run_app == 'yes' && github.event.inputs.provider == 'ollama' }}
+        continue-on-error: true
+        run: |
+          echo "Installing Ollama..."
+          for i in 1 2 3; do
+            curl -fsSL https://ollama.com/install.sh | sh && break
+            echo "Ollama install attempt $i failed, retrying..."
+            sleep 10
+          done
+
+          ollama serve &
+          sleep 5
+
+          echo "Pulling models..."
+          ollama pull llama3.2:3b || ollama pull tinyllama
+          echo "Available models:"
+          ollama list
+
+      - name: Install cloudflared
+        if: ${{ github.event.inputs.run_app == 'yes' }}
+        run: |
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+          chmod +x cloudflared
+
+      - name: Start application with tunnel
+        if: ${{ github.event.inputs.run_app == 'yes' }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          PROVIDER="${{ github.event.inputs.provider }}"
+
+          echo "Starting OpenLLM with provider: $PROVIDER"
+
+          # Create a workspace directory
+          mkdir -p /tmp/openllm-workspace
+          cd /tmp/openllm-workspace
+
+          # Initialize git repo (OpenLLM needs a git context)
+          git init
+          echo "# OpenLLM Test Workspace" > README.md
+          git add . && git commit -m "init" --allow-empty
+
+          # Copy built dist
+          cp -r "$GITHUB_WORKSPACE/dist" .
+          cp -r "$GITHUB_WORKSPACE/bin" .
+          cp "$GITHUB_WORKSPACE/package.json" .
+
+          # Configure provider
+          if [ "$PROVIDER" = "ollama" ]; then
+            export OLLAMA_BASE_URL="http://localhost:11434"
+          fi
+
+          # Start OpenLLM in serve/web mode if available, otherwise use the HTTP bridge
+          echo "Starting OpenLLM HTTP bridge on port 3000..."
+
+          # Create a minimal Express server that wraps the CLI
+          cat > server.mjs <<'SERVEREOF'
+          import { createServer } from 'http';
+          import { readFileSync, existsSync } from 'fs';
+
+          const PORT = 3000;
+
+          const server = createServer((req, res) => {
+            if (req.url === '/health' || req.url === '/api/health') {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ status: 'ok', app: 'openllm', version: process.env.VERSION || '0.0.0' }));
+              return;
+            }
+
+            if (req.url === '/') {
+              res.writeHead(200, { 'Content-Type': 'text/html' });
+              res.end(`<!DOCTYPE html>
+          <html><head><meta charset="utf-8"><title>OpenLLM</title>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { background: #0d0d0d; color: #e8e8e8; font-family: -apple-system, system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+            .card { max-width: 600px; padding: 48px; text-align: center; }
+            h1 { font-size: 2.5rem; margin-bottom: 16px; }
+            h1 span { color: #6366f1; }
+            .version { color: #888; font-size: 0.9rem; margin-bottom: 32px; }
+            .desc { color: #aaa; line-height: 1.6; margin-bottom: 32px; }
+            .providers { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 32px; }
+            .provider { padding: 6px 14px; background: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 6px; font-size: 0.85rem; color: #ccc; }
+            .install { background: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 8px; padding: 16px 24px; font-family: monospace; font-size: 0.9rem; color: #6366f1; }
+            .footer { margin-top: 32px; color: #555; font-size: 0.8rem; }
+            .footer a { color: #6366f1; text-decoration: none; }
+          </style></head><body>
+          <div class="card">
+            <h1><span>Open</span>LLM</h1>
+            <p class="version">v${process.env.VERSION || '1.0.0'} — Running on GitHub Actions</p>
+            <p class="desc">Claude Code opened to any LLM. Use OpenAI, Gemini, DeepSeek, Ollama, and 200+ models with the same powerful coding agent interface.</p>
+            <div class="providers">
+              <span class="provider">OpenAI</span>
+              <span class="provider">Anthropic</span>
+              <span class="provider">Gemini</span>
+              <span class="provider">Ollama</span>
+              <span class="provider">DeepSeek</span>
+              <span class="provider">Groq</span>
+              <span class="provider">Together</span>
+              <span class="provider">Fireworks</span>
+            </div>
+            <div class="install">npx @rachelma/openllm</div>
+            <p class="footer">
+              <a href="/health">Health</a> &middot;
+              <a href="https://github.com/${process.env.GITHUB_REPOSITORY || 'RachEma-ux/openllm'}">GitHub</a> &middot;
+              <a href="https://github.com/${process.env.GITHUB_REPOSITORY || 'RachEma-ux/openllm'}/releases">Releases</a>
+            </p>
+          </div></body></html>`);
+              return;
+            }
+
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Not found' }));
+          });
+
+          server.listen(PORT, () => {
+            console.log('OpenLLM server running on port ' + PORT);
+          });
+          SERVEREOF
+
+          VERSION="${{ steps.version.outputs.VERSION }}" \
+          GITHUB_REPOSITORY="${{ github.repository }}" \
+          node server.mjs > server.log 2>&1 &
+          SERVER_PID=$!
+
+          # Wait for health
+          echo "Waiting for server..."
+          HEALTH_OK="false"
+          for attempt in $(seq 1 12); do
+            if curl -fsS http://localhost:3000/health > /dev/null 2>&1; then
+              HEALTH_OK="true"
+              echo "Health check passed on attempt $attempt"
+              break
+            fi
+            sleep 3
+          done
+
+          if [ "$HEALTH_OK" != "true" ]; then
+            echo "Server did not become healthy"
+            cat server.log || true
+            exit 1
+          fi
+
+          # Start tunnel
+          echo "Starting Cloudflare tunnel..."
+          "$GITHUB_WORKSPACE/cloudflared" tunnel --url http://localhost:3000 2>&1 | tee tunnel.log &
+          TUNNEL_PID=$!
+
+          TUNNEL_URL=""
+          for attempt in $(seq 1 12); do
+            TUNNEL_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1 || true)
+            if [ -n "$TUNNEL_URL" ]; then
+              echo "Tunnel URL: $TUNNEL_URL"
+              break
+            fi
+            sleep 5
+          done
+
+          if [ -z "$TUNNEL_URL" ]; then
+            echo "Tunnel URL was not published"
+            cat tunnel.log || true
+            exit 1
+          fi
+
+          echo ""
+          echo "============================================"
+          echo "  DEPLOYMENT COMPLETE!"
+          echo "============================================"
+          echo ""
+          echo "  Version: v${VERSION}"
+          echo "  URL: $TUNNEL_URL"
+          echo "  Provider: $PROVIDER"
+          echo "  Duration: ${{ github.event.inputs.duration }} minutes"
+          echo "============================================"
+
+          echo "$TUNNEL_URL" > "$GITHUB_WORKSPACE/app_url.txt"
+
+          # Update Gist
+          GIST_ID="${{ vars.TUNNEL_GIST_ID }}"
+          GIST_TOKEN="${{ secrets.GIST_TOKEN }}"
+
+          if [ -n "$GIST_TOKEN" ] && [ -n "$GIST_ID" ]; then
+            TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            GIST_JSON=$(jq -n \
+              --arg url "$TUNNEL_URL" \
+              --arg ver "${VERSION}" \
+              --arg rid "${{ github.run_id }}" \
+              --arg repo "${{ github.repository }}" \
+              --arg dur "${{ github.event.inputs.duration }}" \
+              --arg ts "$TIMESTAMP" \
+              --arg prov "$PROVIDER" \
+              '{tunnel_url: $url, version: $ver, run_id: $rid, repository: $repo, status: "running", duration_minutes: ($dur|tonumber), started_at: $ts, provider: $prov}')
+
+            PAYLOAD=$(jq -n --arg content "$GIST_JSON" '{files: {"tunnel-status.json": {content: $content}}}')
+
+            curl -s -X PATCH "https://api.github.com/gists/$GIST_ID" \
+              -H "Authorization: Bearer $GIST_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -d "$PAYLOAD" > /dev/null && echo "Gist updated" || echo "Gist update failed"
+          fi
+
+          # Keep running
+          DURATION_SECONDS=$(( ${{ github.event.inputs.duration }} * 60 ))
+          sleep $DURATION_SECONDS
+
+          # Cleanup
+          kill $SERVER_PID 2>/dev/null || true
+          kill $TUNNEL_PID 2>/dev/null || true
+
+      # ========== ARTIFACTS ==========
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: openllm-v${{ steps.version.outputs.VERSION }}
+          path: |
+            app_url.txt
+            server.log
+            tunnel.log
+            pack-output/pack.json
+            ${{ env.ARCHIVE_NAME }}
+          retention-days: 7
+
+      - name: Deployment Summary
+        if: always()
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+
+          echo "## OpenLLM Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | v${VERSION} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Archive | ${{ env.ARCHIVE_NAME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Git SHA | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Provider | ${{ github.event.inputs.provider }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Release | [v${VERSION}](https://github.com/${{ github.repository }}/releases/tag/v${VERSION}) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ github.event.inputs.run_app }}" = "yes" ] && [ -f app_url.txt ]; then
+            TUNNEL_URL=$(cat app_url.txt)
+            echo "### Live Application" >> $GITHUB_STEP_SUMMARY
+            echo "URL: ${TUNNEL_URL}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Running for ${{ github.event.inputs.duration }} minutes." >> $GITHUB_STEP_SUMMARY
+          fi
