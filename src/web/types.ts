@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 export type WebServerOptions = {
-  /** TCP port to listen on. Defaults to OPENLLM_WEB_PORT or 3000. */
+  /** TCP port to listen on. Defaults to OPENLLM_WEB_PORT or 5000. Range: 5000–5999. */
   port?: number
   /**
    * Callback invoked when the client sends a user message.
