@@ -1,0 +1,1664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenLLM</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<style>
+/* ── Reset & Base ───────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0d0d0d;
+  --bg-elevated: #151515;
+  --bg-code: #1e1e1e;
+  --text: #e8e8e8;
+  --text-dim: #888;
+  --text-muted: #555;
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --border: #2a2a2a;
+  --green: #22c55e;
+  --blue: #3b82f6;
+  --yellow: #f59e0b;
+  --red: #ef4444;
+  --sidebar-w: 56px;
+  --panel-w: 260px;
+  --font: -apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
+  --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  --transition: 200ms ease-out;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #444; }
+
+/* ── Layout Shell ───────────────────────────────────────────────── */
+#app {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* ── Sidebar Rail ───────────────────────────────────────────────── */
+#sidebar-rail {
+  width: var(--sidebar-w);
+  min-width: var(--sidebar-w);
+  height: 100%;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  z-index: 30;
+  transition: transform var(--transition);
+}
+
+.rail-btn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 18px;
+  margin: 2px 0;
+  transition: background 150ms, color 150ms;
+  position: relative;
+}
+.rail-btn:hover { background: #1a1a1a; color: var(--text); }
+.rail-btn.active { background: var(--accent); color: #fff; }
+.rail-btn.active:hover { background: var(--accent-hover); }
+
+.rail-spacer { flex: 1; }
+.rail-divider { width: 28px; height: 1px; background: var(--border); margin: 6px 0; }
+
+.rail-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 11px;
+  color: #fff;
+  background: var(--accent);
+  margin-bottom: 4px;
+  letter-spacing: -0.5px;
+}
+
+.project-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+  background: #1e1e1e;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color 150ms, background 150ms;
+}
+.project-avatar:hover { border-color: var(--accent); background: #1a1a2e; }
+.project-avatar.active { border-color: var(--accent); background: var(--accent); color: #fff; }
+
+/* ── Project Panel (slide-in) ───────────────────────────────────── */
+#project-panel {
+  width: 0;
+  overflow: hidden;
+  height: 100%;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  transition: width var(--transition);
+  flex-shrink: 0;
+  z-index: 20;
+}
+#project-panel.open { width: var(--panel-w); }
+
+#project-panel-inner {
+  width: var(--panel-w);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.panel-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.panel-close {
+  width: 28px; height: 28px;
+  border: none; background: transparent;
+  color: var(--text-dim); cursor: pointer;
+  border-radius: 4px; font-size: 16px;
+  display: flex; align-items: center; justify-content: center;
+}
+.panel-close:hover { background: #1a1a1a; color: var(--text); }
+
+.session-list { flex: 1; overflow-y: auto; }
+
+.session-item {
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-bottom: 4px;
+  transition: background 150ms;
+}
+.session-item:hover { background: #1a1a1a; }
+.session-item.active { background: var(--accent); }
+.session-item.active .session-meta { color: rgba(255,255,255,0.7); }
+
+.session-title {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+.session-meta { font-size: 11px; color: var(--text-dim); }
+
+.panel-new-btn {
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  width: 100%;
+  transition: border-color 150ms, color 150ms;
+}
+.panel-new-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Main Content ───────────────────────────────────────────────── */
+#main-content {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* ── HOME VIEW ──────────────────────────────────────────────────── */
+#home-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  overflow-y: auto;
+}
+#home-view.hidden { display: none; }
+
+.home-hero {
+  text-align: center;
+  margin-bottom: 40px;
+}
+.home-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 auto 16px;
+  letter-spacing: -0.5px;
+}
+.home-title {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.home-subtitle {
+  font-size: 14px;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 99px;
+  background: #0a1a0a;
+  border: 1px solid #1a3a1a;
+  font-size: 12px;
+  color: var(--green);
+}
+.status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.provider-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 99px;
+  background: #1a1a2e;
+  border: 1px solid #2a2a4e;
+  font-size: 12px;
+  color: var(--accent);
+  margin-top: 8px;
+}
+
+.home-sessions {
+  width: 100%;
+  max-width: 520px;
+}
+.home-sessions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.home-sessions-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+}
+
+.home-session-card {
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  cursor: pointer;
+  margin-bottom: 8px;
+  transition: border-color 150ms, background 150ms;
+}
+.home-session-card:hover { border-color: var(--accent); background: #1a1a2e; }
+.home-session-card-title {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.home-session-card-meta {
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  gap: 12px;
+}
+
+.new-session-btn {
+  width: 100%;
+  max-width: 520px;
+  margin-top: 20px;
+  padding: 14px;
+  border-radius: 10px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms;
+}
+.new-session-btn:hover { background: var(--accent-hover); }
+
+/* ── CHAT VIEW ──────────────────────────────────────────────────── */
+#chat-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#chat-view.hidden { display: none; }
+
+/* Chat header */
+.chat-header {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+  flex-shrink: 0;
+}
+.back-btn {
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--text-dim);
+  border-radius: 6px; cursor: pointer; font-size: 18px;
+}
+.back-btn:hover { background: #1a1a1a; color: var(--text); }
+.chat-header-title {
+  font-size: 14px;
+  font-weight: 600;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-header-status {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: #1a1a1a;
+}
+
+/* Messages area */
+#messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Message bubbles */
+.msg {
+  max-width: 85%;
+  animation: msg-in 150ms ease-out;
+}
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.msg-user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 14px 14px 4px 14px;
+  font-size: 14px;
+}
+
+.msg-assistant {
+  align-self: flex-start;
+  background: transparent;
+  padding: 4px 0;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+/* Markdown inside assistant messages */
+.msg-assistant h1, .msg-assistant h2, .msg-assistant h3 {
+  font-weight: 700;
+  margin: 12px 0 6px;
+}
+.msg-assistant h1 { font-size: 20px; }
+.msg-assistant h2 { font-size: 17px; }
+.msg-assistant h3 { font-size: 15px; }
+.msg-assistant p { margin: 4px 0; }
+.msg-assistant ul, .msg-assistant ol { padding-left: 20px; margin: 4px 0; }
+.msg-assistant strong { font-weight: 700; }
+.msg-assistant em { font-style: italic; }
+
+.msg-assistant code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  background: var(--bg-code);
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+.msg-assistant pre {
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.msg-assistant pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+/* Tool cards */
+.tool-card {
+  align-self: flex-start;
+  max-width: 85%;
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  border-left: 3px solid var(--green);
+  margin: 4px 0;
+  overflow: hidden;
+  animation: msg-in 150ms ease-out;
+}
+.tool-card.tool-file { border-left-color: var(--blue); }
+.tool-card.tool-web { border-left-color: var(--yellow); }
+.tool-card.tool-error { border-left-color: var(--red); }
+
+.tool-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.tool-card-icon {
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+}
+.tool-card-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+}
+.tool-card-status {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.tool-card-chevron {
+  font-size: 12px;
+  color: var(--text-muted);
+  transition: transform 150ms;
+}
+.tool-card.open .tool-card-chevron { transform: rotate(90deg); }
+
+.tool-card-body {
+  display: none;
+  padding: 0 12px 10px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.tool-card.open .tool-card-body { display: block; }
+
+.tool-output {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.tool-input-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Permission cards */
+.perm-card {
+  align-self: flex-start;
+  max-width: 85%;
+  background: #1a1a2e;
+  border-radius: 8px;
+  border-left: 3px solid var(--yellow);
+  padding: 12px 14px;
+  margin: 4px 0;
+  animation: msg-in 150ms ease-out;
+}
+.perm-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--yellow);
+  margin-bottom: 6px;
+}
+.perm-card-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  font-family: var(--mono);
+  word-break: break-all;
+}
+.perm-card-actions {
+  display: flex;
+  gap: 8px;
+}
+.perm-btn {
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms;
+}
+.perm-btn-allow {
+  background: var(--green);
+  color: #fff;
+}
+.perm-btn-allow:hover { background: #16a34a; }
+.perm-btn-deny {
+  background: #2a1a1a;
+  color: var(--red);
+  border: 1px solid #3a2020;
+}
+.perm-btn-deny:hover { background: #3a2020; }
+.perm-resolved {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 0;
+}
+.perm-resolved.allowed { color: var(--green); }
+.perm-resolved.denied { color: var(--red); }
+
+/* Streaming cursor */
+.streaming-cursor::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 16px;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink 0.8s step-end infinite;
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* Typing indicator */
+.typing-indicator {
+  align-self: flex-start;
+  display: flex;
+  gap: 4px;
+  padding: 10px 14px;
+  animation: msg-in 150ms ease-out;
+}
+.typing-indicator span {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: typing-bounce 1.2s infinite;
+}
+.typing-indicator span:nth-child(2) { animation-delay: 0.15s; }
+.typing-indicator span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-4px); }
+}
+
+/* ── Composer ───────────────────────────────────────────────────── */
+#composer {
+  border-top: 1px solid var(--border);
+  padding: 12px 16px;
+  flex-shrink: 0;
+}
+#composer-inner {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 150ms;
+}
+#composer-inner:focus-within { border-color: var(--accent); }
+
+#composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+#msg-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  max-height: 160px;
+  min-height: 22px;
+  overflow-y: auto;
+}
+#msg-input::placeholder { color: var(--text-muted); }
+
+#send-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+  transition: background 150ms, opacity 150ms;
+}
+#send-btn:hover { background: var(--accent-hover); }
+#send-btn:disabled { opacity: 0.4; cursor: default; }
+#send-btn.cancel-mode { background: var(--red); }
+
+#composer-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.meta-select {
+  background: #1a1a1a;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 3px 8px;
+  outline: none;
+  cursor: pointer;
+}
+.meta-select:hover { border-color: #444; }
+
+.token-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+/* ── Error Toast ────────────────────────────────────────────────── */
+#toast-container {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.toast {
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: #1a1010;
+  border: 1px solid #3a2020;
+  color: var(--red);
+  font-size: 13px;
+  max-width: 360px;
+  animation: toast-in 200ms ease-out;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Mobile Overlay ─────────────────────────────────────────────── */
+#mobile-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 25;
+}
+#mobile-overlay.visible { display: block; }
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  #sidebar-rail {
+    position: fixed;
+    left: 0;
+    top: 0;
+    transform: translateX(-100%);
+    z-index: 35;
+  }
+  #sidebar-rail.mobile-open {
+    transform: translateX(0);
+  }
+  #project-panel {
+    position: fixed;
+    left: var(--sidebar-w);
+    top: 0;
+    z-index: 32;
+    height: 100%;
+    background: var(--bg);
+  }
+  .mobile-hamburger {
+    display: flex !important;
+  }
+  .msg { max-width: 95%; }
+}
+@media (min-width: 641px) {
+  .mobile-hamburger { display: none !important; }
+}
+
+.mobile-hamburger {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  z-index: 20;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+</style>
+</head>
+<body>
+
+<!-- Mobile hamburger -->
+<button class="mobile-hamburger" id="hamburger-btn" aria-label="Menu">&#9776;</button>
+
+<!-- Mobile overlay -->
+<div id="mobile-overlay"></div>
+
+<div id="app">
+
+  <!-- Sidebar Rail -->
+  <nav id="sidebar-rail">
+    <button class="rail-btn" id="rail-menu-btn" title="Menu">&#9776;</button>
+    <div class="rail-divider"></div>
+    <div class="rail-logo" title="OpenLLM">OL</div>
+    <div class="rail-divider"></div>
+    <div id="project-avatars"></div>
+    <button class="rail-btn" id="rail-add-btn" title="New project">+</button>
+    <div class="rail-spacer"></div>
+    <div class="rail-divider"></div>
+    <button class="rail-btn" id="rail-settings-btn" title="Settings">&#9881;</button>
+    <button class="rail-btn" id="rail-help-btn" title="Help">?</button>
+  </nav>
+
+  <!-- Project Panel -->
+  <aside id="project-panel">
+    <div id="project-panel-inner">
+      <div class="panel-header">
+        <span class="panel-title" id="panel-project-name">Project</span>
+        <button class="panel-close" id="panel-close-btn">&times;</button>
+      </div>
+      <div class="session-list" id="session-list"></div>
+      <button class="panel-new-btn" id="panel-new-session-btn">+ New Session</button>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main id="main-content">
+
+    <!-- HOME VIEW -->
+    <div id="home-view">
+      <div class="home-hero">
+        <div class="home-logo">OL</div>
+        <h1 class="home-title">OpenLLM</h1>
+        <p class="home-subtitle">Local-first LLM development platform</p>
+        <div class="status-badge">
+          <span class="status-dot"></span>
+          <span id="status-text">Connecting...</span>
+        </div>
+        <div class="provider-badge" id="provider-badge">
+          <span>&#9679;</span>
+          <span id="provider-text">No provider</span>
+        </div>
+      </div>
+      <div class="home-sessions">
+        <div class="home-sessions-header">
+          <span class="home-sessions-title">Recent Sessions</span>
+        </div>
+        <div id="home-session-list"></div>
+      </div>
+      <button class="new-session-btn" id="home-new-session-btn">New Session</button>
+    </div>
+
+    <!-- CHAT VIEW -->
+    <div id="chat-view" class="hidden">
+      <div class="chat-header">
+        <button class="back-btn" id="back-btn" title="Back to home">&#8592;</button>
+        <span class="chat-header-title" id="chat-title">New Session</span>
+        <span class="chat-header-status" id="chat-status">ready</span>
+      </div>
+      <div id="messages"></div>
+      <div id="composer">
+        <div id="composer-inner">
+          <div id="composer-row">
+            <textarea id="msg-input" rows="1" placeholder="Ask anything..."></textarea>
+            <button id="send-btn" title="Send" aria-label="Send">&#10148;</button>
+          </div>
+          <div id="composer-meta">
+            <select class="meta-select" id="model-select">
+              <option value="default">Default Model</option>
+              <option value="claude-sonnet">Claude Sonnet</option>
+              <option value="claude-opus">Claude Opus</option>
+              <option value="gpt-4o">GPT-4o</option>
+              <option value="local">Local Model</option>
+            </select>
+            <select class="meta-select" id="mode-select">
+              <option value="code">Code</option>
+              <option value="chat">Chat</option>
+              <option value="agent">Agent</option>
+            </select>
+            <span class="token-count" id="token-count"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script>
+/* ================================================================
+   OpenLLM Web UI — Single-Page Application
+   ================================================================ */
+(function() {
+  'use strict';
+
+  // ── State ────────────────────────────────────────────────────────
+  const state = {
+    ws: null,
+    connected: false,
+    currentView: 'home',  // 'home' | 'chat'
+    projects: [],
+    activeProjectId: null,
+    sessions: {},          // projectId -> [session]
+    activeSessionId: null,
+    messages: [],          // current session messages
+    streaming: false,
+    streamBuffer: '',
+    currentToolCards: {},  // id -> element
+    permCallbacks: {},     // id -> { allow, deny }
+    reconnectTimer: null,
+    reconnectDelay: 1000,
+  };
+
+  // ── DOM References ───────────────────────────────────────────────
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => document.querySelectorAll(sel);
+
+  const dom = {
+    app: $('#app'),
+    sidebarRail: $('#sidebar-rail'),
+    projectAvatars: $('#project-avatars'),
+    projectPanel: $('#project-panel'),
+    panelProjectName: $('#panel-project-name'),
+    panelCloseBtn: $('#panel-close-btn'),
+    sessionList: $('#session-list'),
+    panelNewSessionBtn: $('#panel-new-session-btn'),
+    homeView: $('#home-view'),
+    chatView: $('#chat-view'),
+    statusText: $('#status-text'),
+    providerText: $('#provider-text'),
+    homeSessionList: $('#home-session-list'),
+    homeNewSessionBtn: $('#home-new-session-btn'),
+    messages: $('#messages'),
+    chatTitle: $('#chat-title'),
+    chatStatus: $('#chat-status'),
+    backBtn: $('#back-btn'),
+    msgInput: $('#msg-input'),
+    sendBtn: $('#send-btn'),
+    tokenCount: $('#token-count'),
+    toastContainer: $('#toast-container'),
+    hamburgerBtn: $('#hamburger-btn'),
+    mobileOverlay: $('#mobile-overlay'),
+    railMenuBtn: $('#rail-menu-btn'),
+    railAddBtn: $('#rail-add-btn'),
+    railSettingsBtn: $('#rail-settings-btn'),
+    railHelpBtn: $('#rail-help-btn'),
+  };
+
+  // ── Initialize Markdown Parser ───────────────────────────────────
+  if (typeof marked !== 'undefined') {
+    marked.setOptions({
+      breaks: true,
+      gfm: true,
+      headerIds: false,
+      mangle: false,
+    });
+  }
+
+  function renderMarkdown(text) {
+    if (typeof marked !== 'undefined') {
+      try { return marked.parse(text); }
+      catch (e) { /* fallback */ }
+    }
+    return escapeHtml(text).replace(/\n/g, '<br>');
+  }
+
+  function escapeHtml(str) {
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+    return str.replace(/[&<>"']/g, c => map[c]);
+  }
+
+  // ── Demo Data ────────────────────────────────────────────────────
+  function initDemoData() {
+    state.projects = [
+      { id: 'p1', name: 'MyApp', short: 'MA' },
+      { id: 'p2', name: 'API Server', short: 'AS' },
+    ];
+    state.sessions = {
+      p1: [
+        { id: 's1', title: 'Fix auth middleware', time: '2 min ago', messages: 3 },
+        { id: 's2', title: 'Add user dashboard', time: '1 hour ago', messages: 12 },
+        { id: 's3', title: 'Refactor DB schema', time: '3 hours ago', messages: 8 },
+      ],
+      p2: [
+        { id: 's4', title: 'Setup Express routes', time: '30 min ago', messages: 5 },
+        { id: 's5', title: 'Rate limiting', time: '2 days ago', messages: 20 },
+      ],
+    };
+  }
+
+  // ── WebSocket ────────────────────────────────────────────────────
+  function connectWS() {
+    if (state.ws && state.ws.readyState <= 1) return;
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${proto}//${location.host}/ws`;
+
+    try {
+      state.ws = new WebSocket(url);
+    } catch (e) {
+      updateConnectionStatus(false);
+      scheduleReconnect();
+      return;
+    }
+
+    state.ws.onopen = () => {
+      state.connected = true;
+      state.reconnectDelay = 1000;
+      updateConnectionStatus(true);
+    };
+
+    state.ws.onclose = () => {
+      state.connected = false;
+      updateConnectionStatus(false);
+      if (state.streaming) {
+        state.streaming = false;
+        finalizeBotMessage();
+        updateSendButton();
+      }
+      scheduleReconnect();
+    };
+
+    state.ws.onerror = () => {
+      state.connected = false;
+      updateConnectionStatus(false);
+    };
+
+    state.ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        handleWSMessage(msg);
+      } catch (e) {
+        console.error('WS parse error:', e);
+      }
+    };
+  }
+
+  function scheduleReconnect() {
+    if (state.reconnectTimer) return;
+    state.reconnectTimer = setTimeout(() => {
+      state.reconnectTimer = null;
+      state.reconnectDelay = Math.min(state.reconnectDelay * 1.5, 15000);
+      connectWS();
+    }, state.reconnectDelay);
+  }
+
+  function sendWS(obj) {
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+      state.ws.send(JSON.stringify(obj));
+    }
+  }
+
+  function updateConnectionStatus(connected) {
+    if (connected) {
+      dom.statusText.textContent = 'Connected';
+      dom.chatStatus.textContent = 'ready';
+    } else {
+      dom.statusText.textContent = 'Reconnecting...';
+      dom.chatStatus.textContent = 'disconnected';
+    }
+  }
+
+  // ── WS Message Handler ──────────────────────────────────────────
+  function handleWSMessage(msg) {
+    switch (msg.type) {
+      case 'token':
+        handleToken(msg.content);
+        break;
+      case 'tool_use':
+        handleToolUse(msg);
+        break;
+      case 'tool_result':
+        handleToolResult(msg);
+        break;
+      case 'done':
+        handleDone(msg);
+        break;
+      case 'error':
+        handleError(msg);
+        break;
+      case 'permission_request':
+        handlePermissionRequest(msg);
+        break;
+      default:
+        console.log('Unknown WS message type:', msg.type);
+    }
+  }
+
+  function handleToken(content) {
+    if (!state.streaming) {
+      state.streaming = true;
+      state.streamBuffer = '';
+      removeTypingIndicator();
+      appendBotMessage('');
+      dom.chatStatus.textContent = 'generating...';
+    }
+    state.streamBuffer += content;
+    updateStreamingMessage(state.streamBuffer);
+    updateSendButton();
+  }
+
+  function handleToolUse(msg) {
+    removeTypingIndicator();
+    if (state.streaming) {
+      finalizeBotMessage();
+      state.streaming = false;
+      state.streamBuffer = '';
+    }
+
+    const toolId = msg.id || ('tool_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6));
+    const card = createToolCard(msg.tool, msg.input, toolId);
+    dom.messages.appendChild(card);
+    state.currentToolCards[toolId] = card;
+    scrollToBottom();
+    dom.chatStatus.textContent = `running ${msg.tool}...`;
+  }
+
+  function handleToolResult(msg) {
+    const toolId = msg.id || Object.keys(state.currentToolCards).pop();
+    const card = state.currentToolCards[toolId];
+    if (card) {
+      const statusEl = card.querySelector('.tool-card-status');
+      const bodyEl = card.querySelector('.tool-card-body');
+      const outputEl = card.querySelector('.tool-output');
+
+      if (msg.error) {
+        statusEl.textContent = 'error';
+        statusEl.style.color = 'var(--red)';
+        card.classList.add('tool-error');
+      } else {
+        statusEl.textContent = 'done';
+        statusEl.style.color = 'var(--green)';
+      }
+
+      if (outputEl && msg.output) {
+        outputEl.textContent = msg.output.slice(0, 5000);
+      }
+    }
+    dom.chatStatus.textContent = 'generating...';
+    scrollToBottom();
+  }
+
+  function handleDone(msg) {
+    if (state.streaming) {
+      finalizeBotMessage();
+    }
+    state.streaming = false;
+    state.streamBuffer = '';
+    removeTypingIndicator();
+    dom.chatStatus.textContent = 'ready';
+
+    if (msg.usage) {
+      const { input_tokens, output_tokens } = msg.usage;
+      if (input_tokens || output_tokens) {
+        dom.tokenCount.textContent = `${(input_tokens || 0).toLocaleString()} in / ${(output_tokens || 0).toLocaleString()} out`;
+      }
+    }
+    updateSendButton();
+    scrollToBottom();
+  }
+
+  function handleError(msg) {
+    state.streaming = false;
+    state.streamBuffer = '';
+    removeTypingIndicator();
+    dom.chatStatus.textContent = 'error';
+    showToast(msg.message || 'An error occurred');
+    updateSendButton();
+  }
+
+  function handlePermissionRequest(msg) {
+    removeTypingIndicator();
+    if (state.streaming) {
+      finalizeBotMessage();
+      state.streaming = false;
+      state.streamBuffer = '';
+    }
+    dom.chatStatus.textContent = 'awaiting permission';
+
+    const card = createPermissionCard(msg);
+    dom.messages.appendChild(card);
+    scrollToBottom();
+  }
+
+  // ── Message Rendering ───────────────────────────────────────────
+  function appendUserMessage(text) {
+    const el = document.createElement('div');
+    el.className = 'msg msg-user';
+    el.textContent = text;
+    dom.messages.appendChild(el);
+    state.messages.push({ role: 'user', content: text });
+    scrollToBottom();
+  }
+
+  function appendBotMessage(text) {
+    const el = document.createElement('div');
+    el.className = 'msg msg-assistant streaming-cursor';
+    el.innerHTML = renderMarkdown(text);
+    el.dataset.msgIndex = state.messages.length;
+    dom.messages.appendChild(el);
+    state.messages.push({ role: 'assistant', content: text });
+    scrollToBottom();
+  }
+
+  function updateStreamingMessage(text) {
+    const els = dom.messages.querySelectorAll('.msg-assistant.streaming-cursor');
+    const el = els[els.length - 1];
+    if (el) {
+      el.innerHTML = renderMarkdown(text);
+      el.classList.add('streaming-cursor');
+      const idx = parseInt(el.dataset.msgIndex);
+      if (!isNaN(idx) && state.messages[idx]) {
+        state.messages[idx].content = text;
+      }
+    }
+    scrollToBottom();
+  }
+
+  function finalizeBotMessage() {
+    const els = dom.messages.querySelectorAll('.streaming-cursor');
+    els.forEach(el => el.classList.remove('streaming-cursor'));
+  }
+
+  function showTypingIndicator() {
+    if (dom.messages.querySelector('.typing-indicator')) return;
+    const el = document.createElement('div');
+    el.className = 'typing-indicator';
+    el.innerHTML = '<span></span><span></span><span></span>';
+    dom.messages.appendChild(el);
+    scrollToBottom();
+  }
+
+  function removeTypingIndicator() {
+    const el = dom.messages.querySelector('.typing-indicator');
+    if (el) el.remove();
+  }
+
+  function createToolCard(toolName, input, toolId) {
+    const card = document.createElement('div');
+    const cls = toolName.toLowerCase().includes('bash') || toolName.toLowerCase().includes('command')
+      ? '' : toolName.toLowerCase().includes('file') || toolName.toLowerCase().includes('edit')
+      ? 'tool-file' : toolName.toLowerCase().includes('web') || toolName.toLowerCase().includes('fetch')
+      ? 'tool-web' : '';
+    card.className = `tool-card ${cls}`;
+    card.dataset.toolId = toolId;
+
+    const icon = toolName.toLowerCase().includes('bash') || toolName.toLowerCase().includes('command')
+      ? '&#9638;' : toolName.toLowerCase().includes('file') || toolName.toLowerCase().includes('edit')
+      ? '&#128196;' : toolName.toLowerCase().includes('web') || toolName.toLowerCase().includes('fetch')
+      ? '&#127760;' : '&#9881;';
+
+    let inputPreview = '';
+    if (input) {
+      if (typeof input === 'string') {
+        inputPreview = input.slice(0, 120);
+      } else if (input.command) {
+        inputPreview = input.command.slice(0, 120);
+      } else if (input.file_path) {
+        inputPreview = input.file_path;
+      } else {
+        try { inputPreview = JSON.stringify(input).slice(0, 120); }
+        catch(e) { inputPreview = '...'; }
+      }
+    }
+
+    card.innerHTML = `
+      <div class="tool-card-header">
+        <span class="tool-card-icon">${icon}</span>
+        <span class="tool-card-name">${escapeHtml(toolName)}</span>
+        <span class="tool-card-status" style="color:var(--yellow)">running</span>
+        <span class="tool-card-chevron">&#9654;</span>
+      </div>
+      <div class="tool-card-body">
+        ${inputPreview ? `<div class="tool-input-label">Input</div><pre class="tool-output">${escapeHtml(inputPreview)}</pre>` : ''}
+        <div class="tool-input-label" style="margin-top:8px">Output</div>
+        <pre class="tool-output">Waiting...</pre>
+      </div>
+    `;
+
+    card.querySelector('.tool-card-header').addEventListener('click', () => {
+      card.classList.toggle('open');
+    });
+
+    return card;
+  }
+
+  function createPermissionCard(msg) {
+    const card = document.createElement('div');
+    card.className = 'perm-card';
+
+    const desc = msg.tool ? `${msg.tool}: ${JSON.stringify(msg.input || {}).slice(0, 200)}`
+                          : (msg.description || msg.message || 'Permission requested');
+
+    const permId = msg.id || ('perm_' + Date.now());
+
+    card.innerHTML = `
+      <div class="perm-card-title">&#9888; Permission Required</div>
+      <div class="perm-card-desc">${escapeHtml(desc)}</div>
+      <div class="perm-card-actions" id="perm-actions-${permId}">
+        <button class="perm-btn perm-btn-allow" data-perm-id="${permId}">Allow</button>
+        <button class="perm-btn perm-btn-deny" data-perm-id="${permId}">Deny</button>
+      </div>
+    `;
+
+    const allowBtn = card.querySelector('.perm-btn-allow');
+    const denyBtn = card.querySelector('.perm-btn-deny');
+    const actionsDiv = card.querySelector('.perm-card-actions');
+
+    allowBtn.addEventListener('click', () => {
+      sendWS({ type: 'permission_response', id: permId, allowed: true });
+      actionsDiv.innerHTML = '<div class="perm-resolved allowed">&#10003; Allowed</div>';
+      dom.chatStatus.textContent = 'generating...';
+    });
+
+    denyBtn.addEventListener('click', () => {
+      sendWS({ type: 'permission_response', id: permId, allowed: false });
+      actionsDiv.innerHTML = '<div class="perm-resolved denied">&#10005; Denied</div>';
+      dom.chatStatus.textContent = 'ready';
+    });
+
+    return card;
+  }
+
+  // ── Toasts ──────────────────────────────────────────────────────
+  function showToast(message) {
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = message;
+    dom.toastContainer.appendChild(el);
+    setTimeout(() => {
+      el.style.opacity = '0';
+      el.style.transition = 'opacity 200ms';
+      setTimeout(() => el.remove(), 200);
+    }, 5000);
+  }
+
+  // ── Scroll ──────────────────────────────────────────────────────
+  function scrollToBottom() {
+    requestAnimationFrame(() => {
+      dom.messages.scrollTop = dom.messages.scrollHeight;
+    });
+  }
+
+  // ── View Switching ──────────────────────────────────────────────
+  function switchToHome() {
+    state.currentView = 'home';
+    dom.homeView.classList.remove('hidden');
+    dom.chatView.classList.add('hidden');
+    renderHomeSessionList();
+  }
+
+  function switchToChat(sessionTitle) {
+    state.currentView = 'chat';
+    dom.homeView.classList.add('hidden');
+    dom.chatView.classList.remove('hidden');
+    dom.chatTitle.textContent = sessionTitle || 'New Session';
+    dom.chatStatus.textContent = state.connected ? 'ready' : 'disconnected';
+    dom.messages.innerHTML = '';
+    state.messages = [];
+    state.streamBuffer = '';
+    state.streaming = false;
+    state.currentToolCards = {};
+    dom.tokenCount.textContent = '';
+    dom.msgInput.focus();
+    updateSendButton();
+  }
+
+  // ── Send / Cancel ───────────────────────────────────────────────
+  function sendMessage() {
+    const text = dom.msgInput.value.trim();
+    if (!text || !state.connected) return;
+
+    appendUserMessage(text);
+    sendWS({ type: 'message', content: text });
+    dom.msgInput.value = '';
+    autoResizeInput();
+    showTypingIndicator();
+    dom.chatStatus.textContent = 'thinking...';
+    updateSendButton();
+  }
+
+  function cancelGeneration() {
+    sendWS({ type: 'cancel' });
+    state.streaming = false;
+    state.streamBuffer = '';
+    finalizeBotMessage();
+    removeTypingIndicator();
+    dom.chatStatus.textContent = 'cancelled';
+    updateSendButton();
+    setTimeout(() => {
+      if (dom.chatStatus.textContent === 'cancelled') {
+        dom.chatStatus.textContent = 'ready';
+      }
+    }, 2000);
+  }
+
+  function updateSendButton() {
+    if (state.streaming) {
+      dom.sendBtn.innerHTML = '&#9632;';
+      dom.sendBtn.classList.add('cancel-mode');
+      dom.sendBtn.disabled = false;
+      dom.sendBtn.title = 'Cancel';
+    } else {
+      dom.sendBtn.innerHTML = '&#10148;';
+      dom.sendBtn.classList.remove('cancel-mode');
+      dom.sendBtn.disabled = false;
+      dom.sendBtn.title = 'Send';
+    }
+  }
+
+  // ── Textarea Auto-Resize ────────────────────────────────────────
+  function autoResizeInput() {
+    const el = dom.msgInput;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  }
+
+  // ── Sidebar & Panel ─────────────────────────────────────────────
+  function renderProjectAvatars() {
+    dom.projectAvatars.innerHTML = '';
+    state.projects.forEach(proj => {
+      const av = document.createElement('div');
+      av.className = 'project-avatar' + (state.activeProjectId === proj.id ? ' active' : '');
+      av.textContent = proj.short;
+      av.title = proj.name;
+      av.style.marginBottom = '6px';
+      av.addEventListener('click', () => toggleProject(proj.id));
+      dom.projectAvatars.appendChild(av);
+    });
+  }
+
+  function toggleProject(projectId) {
+    if (state.activeProjectId === projectId && dom.projectPanel.classList.contains('open')) {
+      closePanel();
+    } else {
+      openPanel(projectId);
+    }
+  }
+
+  function openPanel(projectId) {
+    state.activeProjectId = projectId;
+    const proj = state.projects.find(p => p.id === projectId);
+    dom.panelProjectName.textContent = proj ? proj.name : 'Project';
+    dom.projectPanel.classList.add('open');
+    renderProjectAvatars();
+    renderSessionList();
+  }
+
+  function closePanel() {
+    state.activeProjectId = null;
+    dom.projectPanel.classList.remove('open');
+    renderProjectAvatars();
+    closeMobileSidebar();
+  }
+
+  function renderSessionList() {
+    const sessions = state.sessions[state.activeProjectId] || [];
+    dom.sessionList.innerHTML = '';
+    sessions.forEach(session => {
+      const el = document.createElement('div');
+      el.className = 'session-item' + (state.activeSessionId === session.id ? ' active' : '');
+      el.innerHTML = `
+        <div class="session-title">${escapeHtml(session.title)}</div>
+        <div class="session-meta">${session.time} &middot; ${session.messages} msgs</div>
+      `;
+      el.addEventListener('click', () => {
+        state.activeSessionId = session.id;
+        switchToChat(session.title);
+        closePanel();
+      });
+      dom.sessionList.appendChild(el);
+    });
+  }
+
+  function renderHomeSessionList() {
+    dom.homeSessionList.innerHTML = '';
+    const allSessions = [];
+    Object.keys(state.sessions).forEach(pid => {
+      const proj = state.projects.find(p => p.id === pid);
+      state.sessions[pid].forEach(s => {
+        allSessions.push({ ...s, projectName: proj ? proj.name : 'Unknown' });
+      });
+    });
+
+    if (allSessions.length === 0) {
+      dom.homeSessionList.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px">No sessions yet. Start a new one below.</p>';
+      return;
+    }
+
+    allSessions.slice(0, 6).forEach(session => {
+      const el = document.createElement('div');
+      el.className = 'home-session-card';
+      el.innerHTML = `
+        <div class="home-session-card-title">${escapeHtml(session.title)}</div>
+        <div class="home-session-card-meta">
+          <span>${escapeHtml(session.projectName)}</span>
+          <span>${session.time}</span>
+          <span>${session.messages} messages</span>
+        </div>
+      `;
+      el.addEventListener('click', () => {
+        state.activeSessionId = session.id;
+        switchToChat(session.title);
+      });
+      dom.homeSessionList.appendChild(el);
+    });
+  }
+
+  // ── New Project ─────────────────────────────────────────────────
+  function addNewProject() {
+    const name = prompt('Project name:');
+    if (!name || !name.trim()) return;
+    const short = name.trim().slice(0, 2).toUpperCase();
+    const id = 'p_' + Date.now();
+    state.projects.push({ id, name: name.trim(), short });
+    state.sessions[id] = [];
+    renderProjectAvatars();
+    openPanel(id);
+  }
+
+  // ── Mobile Sidebar ──────────────────────────────────────────────
+  function openMobileSidebar() {
+    dom.sidebarRail.classList.add('mobile-open');
+    dom.mobileOverlay.classList.add('visible');
+  }
+
+  function closeMobileSidebar() {
+    dom.sidebarRail.classList.remove('mobile-open');
+    dom.mobileOverlay.classList.remove('visible');
+  }
+
+  // ── Event Bindings ──────────────────────────────────────────────
+  function bindEvents() {
+    // Back to home
+    dom.backBtn.addEventListener('click', switchToHome);
+
+    // New session buttons
+    dom.homeNewSessionBtn.addEventListener('click', () => {
+      state.activeSessionId = 'new_' + Date.now();
+      switchToChat('New Session');
+    });
+    dom.panelNewSessionBtn.addEventListener('click', () => {
+      state.activeSessionId = 'new_' + Date.now();
+      switchToChat('New Session');
+      closePanel();
+    });
+
+    // Composer
+    dom.msgInput.addEventListener('input', autoResizeInput);
+    dom.msgInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (state.streaming) {
+          cancelGeneration();
+        } else {
+          sendMessage();
+        }
+      }
+    });
+
+    dom.sendBtn.addEventListener('click', () => {
+      if (state.streaming) {
+        cancelGeneration();
+      } else {
+        sendMessage();
+      }
+    });
+
+    // Rail buttons
+    dom.railMenuBtn.addEventListener('click', () => {
+      if (dom.projectPanel.classList.contains('open')) {
+        closePanel();
+      } else if (state.projects.length > 0) {
+        openPanel(state.projects[0].id);
+      }
+    });
+
+    dom.railAddBtn.addEventListener('click', addNewProject);
+
+    dom.railSettingsBtn.addEventListener('click', () => {
+      showToast('Settings panel coming soon');
+    });
+
+    dom.railHelpBtn.addEventListener('click', () => {
+      showToast('OpenLLM v0.1.0 — Local-first LLM development platform');
+    });
+
+    // Panel close
+    dom.panelCloseBtn.addEventListener('click', closePanel);
+
+    // Mobile
+    dom.hamburgerBtn.addEventListener('click', () => {
+      if (dom.sidebarRail.classList.contains('mobile-open')) {
+        closeMobileSidebar();
+      } else {
+        openMobileSidebar();
+      }
+    });
+    dom.mobileOverlay.addEventListener('click', () => {
+      closeMobileSidebar();
+      closePanel();
+    });
+
+    // Model/mode selects (for future use)
+    $('#model-select').addEventListener('change', () => {});
+    $('#mode-select').addEventListener('change', () => {});
+  }
+
+  // ── Provider Detection ──────────────────────────────────────────
+  function detectProvider() {
+    // Attempt to read provider info from server
+    fetch('/api/status', { method: 'GET' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && data.provider) {
+          dom.providerText.textContent = data.provider;
+        } else if (data && data.model) {
+          dom.providerText.textContent = data.model;
+        } else {
+          dom.providerText.textContent = 'Local';
+        }
+      })
+      .catch(() => {
+        dom.providerText.textContent = 'Local';
+      });
+  }
+
+  // ── Initialize ──────────────────────────────────────────────────
+  function init() {
+    initDemoData();
+    renderProjectAvatars();
+    renderHomeSessionList();
+    bindEvents();
+    connectWS();
+    detectProvider();
+    updateSendButton();
+
+    // Focus input when chat view is visible
+    const observer = new MutationObserver(() => {
+      if (!dom.chatView.classList.contains('hidden')) {
+        dom.msgInput.focus();
+      }
+    });
+    observer.observe(dom.chatView, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  // Boot
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>

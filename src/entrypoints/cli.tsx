@@ -237,6 +237,21 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Fast-path for `openllm web`: launch web UI with OpenCode templates
+  if (args[0] === 'web' || args[0] === 'serve' || args[0] === '--web') {
+    const port = parseInt(args[1] || process.env.OPENLLM_WEB_PORT || '3000', 10);
+    console.log(`\x1b[36mOpenLLM Web UI starting on http://localhost:${port}/\x1b[0m`);
+    const { startWebServer } = await import('../web/server.js');
+    await startWebServer({
+      port,
+      async onMessage(msg: string): Promise<string> {
+        // TODO: wire to QueryEngine when full integration is ready
+        return JSON.stringify({ type: 'token', content: `Echo: ${msg}` });
+      },
+    });
+    return;
+  }
+
   // Fast-path for `claude ps|logs|attach|kill` and `--bg`/`--background`.
   // Session management against the ~/.claude/sessions/ registry. Flag
   // literals are inlined so bg.js only loads when actually dispatching.
