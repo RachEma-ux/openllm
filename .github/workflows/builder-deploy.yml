@@ -280,6 +280,33 @@ jobs:
             ollama serve &
             OLLAMA_PID=$!
             sleep 3
+
+            # Wait for the daemon to answer /api/tags, then warm up the
+            # model with a dummy generation + keep_alive=30m. Without this
+            # warm-up the first real chat message triggers a cold mmap
+            # load of llama3.2:3b (~20s on a CPU-only GitHub runner),
+            # which takes longer than the WebSocket idle timeout — the
+            # client disconnects before any token is streamed back.
+            for wait_attempt in 1 2 3 4 5; do
+              if curl -fsS --max-time 3 http://localhost:11434/api/tags > /dev/null 2>&1; then
+                echo "🦙 Ollama daemon up (attempt $wait_attempt)"
+                break
+              fi
+              sleep 2
+            done
+
+            echo "🦙 Warming up llama3.2:3b (keep_alive=30m)..."
+            WARMUP_START=$(date +%s)
+            if curl -fsS --max-time 120 http://localhost:11434/api/generate \
+                -H 'Content-Type: application/json' \
+                -d '{"model":"llama3.2:3b","prompt":"hi","stream":false,"keep_alive":"30m"}' \
+                > /tmp/ollama-warmup.log 2>&1; then
+              WARMUP_END=$(date +%s)
+              echo "🦙 Warm-up complete in $(( WARMUP_END - WARMUP_START ))s — model hot for 30m"
+            else
+              echo "⚠️ Ollama warm-up failed (non-fatal — chat will still work but first message will be slow)"
+              tail -20 /tmp/ollama-warmup.log 2>/dev/null || true
+            fi
           else
             echo "⚠️ Ollama not available — skipping local LLM"
           fi
