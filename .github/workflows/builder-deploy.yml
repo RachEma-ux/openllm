@@ -480,18 +480,30 @@ jobs:
           fi
           echo "/api/sentinel returned $(echo "$SENTINEL_BODY" | wc -l) lines — full-agent build confirmed"
 
-          # -------- 9.10  Install localtunnel --------
+          # -------- 9.10  Pre-warm localtunnel via npx --------
           # localtunnel supports HTTP 101 Switching Protocols (WebSocket
           # upgrade) natively. Cloudflare QuickTunnel does NOT — its Workers
           # layer returns 500 on the WS upgrade, breaking the chat UI. Do
           # not replace localtunnel without re-verifying WS support.
-          echo "installing localtunnel"
-          npm install -g localtunnel > /tmp/lt-install.log 2>&1 || {
-            echo "::error::localtunnel install failed"
-            cat /tmp/lt-install.log || true
+          #
+          # Use `npx --yes localtunnel` instead of `npm install -g` because
+          # the ubuntu-latest runner does not grant /usr/local/bin write
+          # permission to the non-root runner user, so global installs fail
+          # with EACCES. npx downloads to a user-writable cache — no sudo,
+          # no prefix setup, no EACCES. The `--yes` flag skips the install
+          # confirmation prompt so it's non-interactive-safe.
+          #
+          # Pre-warm it with `--help` so the package is downloaded and
+          # cached BEFORE we launch it for real at 9.12. This catches
+          # network/registry failures here instead of silently failing at
+          # tunnel launch.
+          echo "pre-warming localtunnel via npx"
+          npx --yes localtunnel --help > /tmp/lt-warm.log 2>&1 || {
+            echo "::error::localtunnel pre-warm (npx --yes localtunnel --help) failed"
+            cat /tmp/lt-warm.log || true
             exit 1
           }
-          lt --version || true
+          echo "localtunnel ready via npx"
 
           # -------- 9.11  Fetch runner public IP (localtunnel password) --------
           # Try multiple IP-reflection services so a single outage doesn't
@@ -515,7 +527,9 @@ jobs:
           echo "runner_ip=$RUNNER_IP (localtunnel interstitial password)"
 
           # -------- 9.12  Launch localtunnel, poll for URL (60s timeout) --------
-          lt --port 5000 --print-requests > tunnel.log 2>&1 &
+          # `npx --yes localtunnel` uses the cache pre-warmed at 9.10, so
+          # this starts instantly without another network round trip.
+          npx --yes localtunnel --port 5000 --print-requests > tunnel.log 2>&1 &
           TUNNEL_PID=$!
           echo "lt pid=$TUNNEL_PID"
           TUNNEL_URL=""
