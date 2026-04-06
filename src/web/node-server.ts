@@ -149,6 +149,7 @@ const PROVIDER_REGISTRY: Record<string, ProviderConfig> = {
   bedrock:    { baseUrl: process.env.AWS_BEDROCK_URL || 'http://localhost:8000/v1', apiKey: process.env.AWS_ACCESS_KEY_ID || '', defaultModel: 'anthropic.claude-3-5-sonnet-20241022-v2:0' },
   vertex:     { baseUrl: process.env.VERTEX_URL || 'http://localhost:8000/v1', apiKey: process.env.VERTEX_API_KEY || '', defaultModel: 'claude-3-5-sonnet@20241022' },
   'atomic-chat': { baseUrl: 'http://localhost:11434/v1', apiKey: 'local', defaultModel: 'default' },
+  alibaba:    { baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', apiKey: process.env.DASHSCOPE_API_KEY || process.env.ALIBABA_API_KEY || '', defaultModel: 'qwen-max' },
 }
 
 // Override defaults from env if set

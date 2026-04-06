@@ -392,6 +392,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
               <option value="bedrock">AWS Bedrock</option>
               <option value="vertex">Google Vertex</option>
               <option value="atomic-chat">Atomic Chat</option>
+              <option value="alibaba">Alibaba (Qwen)</option>
             </select>
             <span style="font-size:10px;opacity:.6;pointer-events:none;position:absolute;right:0;top:50%;transform:translateY(-50%)">&#9662;</span>
           </div>
@@ -796,6 +797,7 @@ const PROVIDERS = {
   bedrock:      {icon:'',badge:'B',models:['anthropic.claude-3-5-sonnet','anthropic.claude-3-haiku']},
   vertex:       {icon:'',badge:'V',models:['claude-3-5-sonnet@20241022','gemini-2.0-flash']},
   'atomic-chat':{icon:'',badge:'⚛',models:['(auto-detect local)']},
+  alibaba:      {icon:'',badge:'Q',models:['qwen-max','qwen-plus','qwen-turbo','qwen-max-longcontext','qwen2.5-72b-instruct','qwen2.5-32b-instruct','qwen2.5-14b-instruct','qwen2.5-7b-instruct','qwen2.5-coder-32b-instruct','qwen2.5-coder-7b-instruct','qwq-32b-preview','qwen-vl-max','qwen-vl-plus']},
 };
 let currentProvider = 'ollama';
 let currentModel = 'tinyllama';
