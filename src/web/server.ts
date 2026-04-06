@@ -215,6 +215,53 @@ export async function startWebServer(
         })
       }
 
+      // SENTINEL live log endpoint.
+      // Returns the last N lines of the process's own stdout+stderr log
+      // (the file the workflow redirects `bun dist/cli.mjs serve 5000` into).
+      // Path resolves from cwd, which the workflow sets to GITHUB_WORKSPACE
+      // before launching the server — that's the same directory the shell
+      // redirect writes to, so this reads our own live log.
+      // Query params:
+      //   ?tail=N  (default 200, max 5000) — return the last N lines
+      //   ?grep=X  (optional) — filter to lines containing X (first)
+      if (pathname === '/api/sentinel') {
+        try {
+          const logPath =
+            process.env.OPENLLM_SENTINEL_LOG_PATH ?? 'server.log'
+          const raw = readFileSync(logPath, 'utf-8')
+          const tailRaw = parseInt(url.searchParams.get('tail') ?? '200', 10)
+          const tail = Math.max(
+            1,
+            Math.min(Number.isFinite(tailRaw) ? tailRaw : 200, 5000),
+          )
+          const grep = url.searchParams.get('grep')
+          let lines = raw.split('\n')
+          if (grep) {
+            lines = lines.filter((l) => l.includes(grep))
+          }
+          const body = lines.slice(-tail).join('\n')
+          return new Response(body, {
+            headers: {
+              'Content-Type': 'text/plain; charset=utf-8',
+              'Cache-Control': 'no-store',
+              'X-Sentinel-Log-Path': logPath,
+              'X-Sentinel-Total-Lines': String(raw.split('\n').length),
+              'X-Sentinel-Returned-Lines': String(
+                Math.min(tail, lines.length),
+              ),
+            },
+          })
+        } catch (e) {
+          return jsonResponse(
+            {
+              error: 'sentinel_log_unavailable',
+              message: e instanceof Error ? e.message : String(e),
+            },
+            500,
+          )
+        }
+      }
+
       if (pathname === '/api/config') {
         return jsonResponse({
           provider: getProviderInfo(),
