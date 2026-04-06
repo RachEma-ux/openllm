@@ -28,6 +28,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: builder-deploy
@@ -64,7 +65,7 @@ jobs:
           fi
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Determine version
         id: version
@@ -100,7 +101,7 @@ jobs:
           echo "REDEPLOY=false" >> $GITHUB_OUTPUT
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@4bc047ad259df6fc24a6c9b0f9a0cb08cf17fbe5 # v2.0.1
         with:
           bun-version: '1.3.11'
 
@@ -192,19 +193,13 @@ jobs:
       # ========== RELEASE PHASE ==========
       - name: Delete existing release
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
-          RELEASE_ID=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/v${VERSION}" \
-            | jq -r '.id // empty')
-
-          if [ -n "$RELEASE_ID" ] && [ "$RELEASE_ID" != "null" ]; then
-            echo "Deleting existing release v${VERSION}..."
-            curl -X DELETE -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/${{ github.repository }}/releases/${RELEASE_ID}"
-            curl -X DELETE -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/${{ github.repository }}/git/refs/tags/v${VERSION}" || true
-          fi
+          gh release delete "v${VERSION}" \
+            --repo "${{ github.repository }}" \
+            --yes --cleanup-tag || true
 
       - name: Generate release checksum
         run: |
@@ -312,7 +307,7 @@ jobs:
 
           # Start tunnel
           echo "🌐 Starting Cloudflare tunnel..."
-          ./cloudflared tunnel --url http://localhost:5000 2>&1 | tee tunnel.log &
+          ./cloudflared tunnel --url http://localhost:5000 > tunnel.log 2>&1 &
           TUNNEL_PID=$!
 
           # Wait for tunnel URL and verify the tunnel process is still alive.
@@ -357,6 +352,11 @@ jobs:
           # Save URL
           echo "$TUNNEL_URL" > app_url.txt
 
+          # Mark the deploy as successful so the final cleanup step knows
+          # that any subsequent timeout/cancellation is "after a successful
+          # run" and the workflow run can be deleted from history.
+          touch "$RUNNER_TEMP/.deploy-success"
+
           # Update Gist with tunnel URL
           echo "📤 Updating Gist with tunnel URL..."
           GIST_ID="${{ vars.TUNNEL_GIST_ID }}"
@@ -400,8 +400,39 @@ jobs:
             kill $OLLAMA_PID 2>/dev/null || true
           fi
 
+      - name: Reset Gist status on exit
+        if: always()
+        run: |
+          GIST_ID="${{ vars.TUNNEL_GIST_ID }}"
+          GIST_TOKEN="${{ secrets.GIST_TOKEN }}"
+
+          if [ -z "$GIST_TOKEN" ] || [ -z "$GIST_ID" ]; then
+            echo "⚠️ GIST_TOKEN or TUNNEL_GIST_ID not configured, skipping Gist cleanup"
+            exit 0
+          fi
+
+          STATUS="stopped"
+          if [ "${{ job.status }}" = "failure" ] || [ "${{ job.status }}" = "cancelled" ]; then
+            STATUS="failed"
+          fi
+
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          GIST_JSON=$(jq -n \
+            --arg rid "${{ github.run_id }}" \
+            --arg repo "${{ github.repository }}" \
+            --arg ts "$TIMESTAMP" \
+            --arg status "$STATUS" \
+            '{tunnel_url: null, version: null, run_id: $rid, repository: $repo, status: $status, stopped_at: $ts, deploy_type: null}')
+
+          PAYLOAD=$(jq -n --arg content "$GIST_JSON" '{files: {"tunnel-status.json": {content: $content}}}')
+
+          curl -s -X PATCH "https://api.github.com/gists/$GIST_ID" \
+            -H "Authorization: Bearer $GIST_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -d "$PAYLOAD" > /dev/null && echo "✅ Gist status set to $STATUS" || echo "⚠️ Gist cleanup failed"
+
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: deployment-v${{ steps.version.outputs.VERSION }}
@@ -436,3 +467,34 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "App will be available for ${{ github.event.inputs.duration }} minutes." >> $GITHUB_STEP_SUMMARY
           fi
+
+      - name: Delete workflow run after successful deploy
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Only delete the run if the deploy reached the "tunnel is live"
+          # milestone. That way a build/release failure stays visible in
+          # Actions history, but a successful run that later times out or
+          # is cancelled gets removed automatically.
+          if [ ! -f "$RUNNER_TEMP/.deploy-success" ]; then
+            echo "ℹ️ Deploy-success marker not set; keeping workflow run."
+            exit 0
+          fi
+
+          JOB_STATUS="${{ job.status }}"
+          if [ "$JOB_STATUS" != "success" ] && [ "$JOB_STATUS" != "cancelled" ]; then
+            echo "ℹ️ Job status is '$JOB_STATUS'; keeping workflow run."
+            exit 0
+          fi
+
+          echo "🗑️  Deploy succeeded (status=$JOB_STATUS). Deleting workflow run ${{ github.run_id }}..."
+          # Fire-and-forget in the background so the API call has time to
+          # dispatch before the runner is torn down by the deletion.
+          (
+            sleep 5
+            gh api -X DELETE "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+              && echo "✅ Workflow run deleted" \
+              || echo "⚠️ Failed to delete workflow run"
+          ) &
+          disown || true
