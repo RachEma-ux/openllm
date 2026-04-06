@@ -69,7 +69,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   if (url === '/api/config') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({
-      provider: { name: process.env.OPENLLM_PROVIDER || 'ollama', model: process.env.OPENAI_MODEL || 'default', baseUrl: process.env.OPENAI_BASE_URL || '' },
+      provider: { name: process.env.OPENLLM_PROVIDER || 'ollama', model: process.env.OPENLLM_MODEL || process.env.OPENAI_MODEL || 'default', baseUrl: process.env.OPENAI_BASE_URL || '' },
     }))
     return true
   }

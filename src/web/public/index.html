@@ -879,8 +879,8 @@ const PROVIDERS = {
   'atomic-chat':{icon:'',badge:'⚛',models:['(auto-detect local)']},
   alibaba:      {icon:'',badge:'Q',models:['qwen-max','qwen-plus','qwen-turbo','qwen-max-longcontext','qwen2.5-72b-instruct','qwen2.5-32b-instruct','qwen2.5-14b-instruct','qwen2.5-7b-instruct','qwen2.5-coder-32b-instruct','qwen2.5-coder-7b-instruct','qwq-32b-preview','qwen-vl-max','qwen-vl-plus']},
 };
-let currentProvider = 'alibaba';
-let currentModel = 'qwen-plus';
+let currentProvider = 'openai';
+let currentModel = 'gpt-5.4-mini';
 
 function selectProvider(prov){
   currentProvider = prov;
@@ -914,7 +914,35 @@ function addProject(){
 /* ── Boot ── */
 renderAvatars();
 renderHome();
-selectProvider('alibaba');
+selectProvider('openai');
+// Honor server-side default (OPENLLM_PROVIDER / OPENLLM_MODEL env vars)
+// exposed via /api/config. This lets the deploy workflow change the
+// default without touching client code.
+fetch('/api/config').then(r=>r.json()).then(cfg=>{
+  const p=cfg && cfg.provider && cfg.provider.name;
+  const m=cfg && cfg.provider && cfg.provider.model;
+  if(p && PROVIDERS[p]){
+    selectProvider(p);
+    if(m && m!=='default'){
+      currentModel=m;
+      const sel=$('#model-sel');
+      if(sel){
+        // Add the model if it's not already in the dropdown so the
+        // server-chosen value survives the selectProvider() reset.
+        let found=false;
+        for(const opt of sel.options){ if(opt.value===m){ found=true; break; } }
+        if(!found){
+          const opt=document.createElement('option');
+          opt.value=m; opt.textContent=m;
+          sel.appendChild(opt);
+        }
+        sel.value=m;
+      }
+    }
+    const sk=$('#apikey-provider-sel');
+    if(sk){ sk.value=currentProvider; loadApiKeyForProvider(); }
+  }
+}).catch(()=>{});
 // Sync the Settings → Provider API Keys dropdown to the active provider
 setTimeout(()=>{
   const sel=$('#apikey-provider-sel');
