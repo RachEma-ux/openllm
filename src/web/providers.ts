@@ -125,7 +125,12 @@ export const PROVIDERS: Record<string, ProviderDef> = {
     badge: 'O',
     baseUrl: 'http://localhost:11434/v1',
     envVar: null,
-    models: ['llama3.2:3b', 'tinyllama', 'phi3'],
+    // tinyllama is first because it's the model the deploy workflow
+    // pre-pulls (~637MB) — picking ollama in the dropdown should land
+    // on a model that actually exists on the runner. Other entries are
+    // suggestions; the actual installed list is auto-detected by
+    // /api/ollama-models on connect.
+    models: ['tinyllama', 'phi3', 'llama3.2:3b'],
     noKeyNeeded: true,
   },
   lmstudio: {

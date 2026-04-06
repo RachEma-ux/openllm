@@ -236,6 +236,36 @@ jobs:
       # env block below; the user can also override per-request by
       # pasting a key into Settings → Provider API Keys (stored in
       # browser localStorage and sent with every chat message).
+      #
+      # Ollama is installed on the same runner so the relay's localhost
+      # ollama provider works end-to-end. Pattern borrowed from
+      # RachEma-ux/MyNewAp1Claude/.github/workflows/builder-deploy.yml.
+
+      - name: Install Ollama and pull tinyllama
+        if: ${{ github.event.inputs.run_app == 'yes' }}
+        continue-on-error: true
+        run: |
+          echo "🦙 Installing Ollama..."
+          for i in 1 2 3; do
+            curl -fsSL https://ollama.com/install.sh | sh && break
+            echo "⚠️ Ollama install attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+
+          echo "🦙 Starting Ollama server for model pull..."
+          ollama serve > /tmp/ollama-pull.log 2>&1 &
+          OLLAMA_PULL_PID=$!
+          sleep 5
+
+          echo "🦙 Pulling tinyllama (~637MB)..."
+          ollama pull tinyllama
+
+          echo "🦙 Available models:"
+          ollama list
+
+          # Stop the pull-time daemon — the run step restarts it cleanly.
+          kill $OLLAMA_PULL_PID 2>/dev/null || true
+          sleep 2
 
       - name: Install cloudflared
         if: ${{ github.event.inputs.run_app == 'yes' }}
@@ -263,6 +293,26 @@ jobs:
 
           echo "🚀 Starting application (defaults from src/web/providers.ts: openai / gpt-5.4-mini)..."
           export OPENLLM_WEB_PORT=5000
+
+          # Start Ollama daemon if it was installed in the previous step.
+          # OLLAMA_PID stays empty when ollama isn't available so the
+          # cleanup branch at the bottom of this script remains a no-op.
+          OLLAMA_PID=""
+          if command -v ollama >/dev/null 2>&1; then
+            echo "🦙 Starting Ollama server (background)..."
+            ollama serve > ollama.log 2>&1 &
+            OLLAMA_PID=$!
+            sleep 3
+            if curl -fsS --max-time 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
+              echo "✅ Ollama daemon healthy on localhost:11434"
+              ollama list || true
+            else
+              echo "⚠️ Ollama daemon did not respond on localhost:11434 within 3s"
+              tail -20 ollama.log 2>/dev/null || true
+            fi
+          else
+            echo "⚠️ ollama binary not found — local provider will be unavailable"
+          fi
 
           echo "Launching: bun src/web/node-server.ts (chat relay, port 5000)"
           bun src/web/node-server.ts > server.log 2>&1 &
@@ -389,6 +439,7 @@ jobs:
           # Cleanup
           kill $SERVER_PID 2>/dev/null || true
           kill $TUNNEL_PID 2>/dev/null || true
+          [ -n "$OLLAMA_PID" ] && kill $OLLAMA_PID 2>/dev/null || true
 
       - name: Reset Gist status on exit
         if: always()
@@ -431,6 +482,7 @@ jobs:
             server.log
             health.log
             tunnel.log
+            ollama.log
             pack-output/pack.json
             ${{ env.ARCHIVE_NAME }}
           retention-days: 7
