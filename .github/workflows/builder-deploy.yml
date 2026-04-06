@@ -234,30 +234,18 @@ jobs:
             "checksums.sha256"
 
       # ========== RUN PHASE (Optional) ==========
-      - name: Install Ollama and pull model
+      - name: Pre-flight — DASHSCOPE_API_KEY must be present
         if: ${{ github.event.inputs.run_app == 'yes' }}
-        continue-on-error: true
+        env:
+          DASHSCOPE_API_KEY_SECRET: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
-          echo "🦙 Installing Ollama..."
-          for i in 1 2 3; do
-            curl -fsSL https://ollama.com/install.sh | sh && break
-            echo "⚠️ Ollama install attempt $i failed, retrying in 10s..."
-            sleep 10
-          done
-
-          echo "🦙 Starting Ollama server for model pull..."
-          ollama serve &
-          OLLAMA_PID=$!
-          sleep 5
-
-          echo "🦙 Pulling llama3.2:1b..."
-          ollama pull llama3.2:1b
-
-          echo "🦙 Available models:"
-          ollama list
-
-          kill $OLLAMA_PID 2>/dev/null || true
-          sleep 2
+          if [ -z "${DASHSCOPE_API_KEY_SECRET:-}" ]; then
+            echo "::error::DASHSCOPE_API_KEY repo secret is missing or empty"
+            echo "   Set it at: https://github.com/${{ github.repository }}/settings/secrets/actions"
+            echo "   Get a key at: https://dashscope.console.aliyun.com (international endpoint)"
+            exit 1
+          fi
+          echo "✅ DASHSCOPE_API_KEY secret is set"
 
       - name: Install cloudflared
         if: ${{ github.event.inputs.run_app == 'yes' }}
@@ -275,71 +263,23 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "🚀 Starting application..."
-
-          # Start Ollama server (model already pulled)
+          echo "🚀 Starting application (provider: alibaba / qwen-plus)..."
           OLLAMA_PID=""
-          if command -v ollama &>/dev/null; then
-            echo "🦙 Starting Ollama server..."
-            ollama serve &
-            OLLAMA_PID=$!
-            sleep 3
 
-            # Wait for the daemon to answer /api/tags, then warm up the
-            # model with a dummy generation + keep_alive=30m. Without this
-            # warm-up the first real chat message triggers a cold mmap
-            # load of llama3.2:1b (~20s on a CPU-only GitHub runner),
-            # which takes longer than the WebSocket idle timeout — the
-            # client disconnects before any token is streamed back.
-            for wait_attempt in 1 2 3 4 5; do
-              if curl -fsS --max-time 3 http://localhost:11434/api/tags > /dev/null 2>&1; then
-                echo "🦙 Ollama daemon up (attempt $wait_attempt)"
-                break
-              fi
-              sleep 2
-            done
-
-            # Light warm-up: load model into memory with keep_alive=30m
-            # so the first real chat message streams tokens immediately
-            # instead of waiting for mmap + CPU warm. node-server.ts is a
-            # no-tools chat relay so we don't need a tool-bearing probe.
-            echo "🦙 Warming up llama3.2:1b (keep_alive=30m)..."
-            WARMUP_START=$(date +%s)
-            curl -fsS --max-time 120 http://localhost:11434/api/generate \
-              -H 'Content-Type: application/json' \
-              -d '{"model":"llama3.2:1b","prompt":"hi","stream":false,"keep_alive":"30m"}' \
-              > /tmp/ollama-warmup.log 2>&1 \
-              && echo "🦙 Warm-up complete in $(( $(date +%s) - WARMUP_START ))s" \
-              || echo "⚠️ Ollama warm-up failed (non-fatal — first message will be slow)"
-          else
-            echo "⚠️ Ollama not available — skipping local LLM"
-          fi
-
-          # Launch the CHAT RELAY (src/web/node-server.ts), not the full
-          # tool-calling agent (dist/cli.mjs serve).
+          # Launch the CHAT RELAY (src/web/node-server.ts). It has its
+          # own provider registry and routes chat messages to Alibaba
+          # DashScope's international OpenAI-compatible endpoint when
+          # the client sends provider=alibaba. The default client-side
+          # provider/model in src/web/public/index.html is set to
+          # alibaba/qwen-plus so the first user message routes there
+          # without any manual selection.
           #
-          # WHY the relay and not the full agent:
-          #   - The full agent sends ~19 tool schemas to every chat
-          #     completion request. Small Ollama models (tinyllama,
-          #     llama3.2:1b, llama3.2:3b) can't reason about that many
-          #     tools on a CPU-only GitHub runner within any reasonable
-          #     WebSocket timeout — every chat hangs.
-          #   - node-server.ts is a plain chat relay with NO tool
-          #     definitions. It simply forwards user messages to
-          #     Ollama's /chat/completions and streams tokens back.
-          #   - This is the configuration that was actually serving
-          #     chat in the "Ground Zero V2" verified-working state —
-          #     the original workflow had a fallback to node-server.ts
-          #     when the full agent failed, and in practice the
-          #     fallback was always the thing serving users.
-          #
-          # Environment: node-server.ts has its own provider config
-          # (hardcoded http://localhost:11434/v1 for ollama) and does
-          # NOT need CLAUDE_CODE_USE_OPENAI / OPENAI_BASE_URL /
-          # OPENAI_API_KEY / OPENAI_MODEL. The relay also serves its
-          # own static UI from src/web/public directly, so no
-          # dist/public staging is needed for this launch path.
+          # DASHSCOPE_API_KEY is already exported via the step-level
+          # env block above. node-server.ts reads it via the "alibaba"
+          # entry in its PROVIDER_REGISTRY.
           export OPENLLM_WEB_PORT=5000
+          export OPENLLM_PROVIDER="alibaba"
+          export OPENLLM_MODEL="qwen-plus"
 
           echo "Launching: bun src/web/node-server.ts (chat relay, port 5000)"
           bun src/web/node-server.ts > server.log 2>&1 &
