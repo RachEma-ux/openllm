@@ -250,8 +250,8 @@ jobs:
           OLLAMA_PID=$!
           sleep 5
 
-          echo "🦙 Pulling tinyllama..."
-          ollama pull tinyllama
+          echo "🦙 Pulling llama3.2:1b..."
+          ollama pull llama3.2:1b
 
           echo "🦙 Available models:"
           ollama list
@@ -288,7 +288,7 @@ jobs:
             # Wait for the daemon to answer /api/tags, then warm up the
             # model with a dummy generation + keep_alive=30m. Without this
             # warm-up the first real chat message triggers a cold mmap
-            # load of tinyllama (~20s on a CPU-only GitHub runner),
+            # load of llama3.2:1b (~20s on a CPU-only GitHub runner),
             # which takes longer than the WebSocket idle timeout — the
             # client disconnects before any token is streamed back.
             for wait_attempt in 1 2 3 4 5; do
@@ -303,7 +303,7 @@ jobs:
             WARMUP_START=$(date +%s)
             if curl -fsS --max-time 120 http://localhost:11434/api/generate \
                 -H 'Content-Type: application/json' \
-                -d '{"model":"tinyllama","prompt":"hi","stream":false,"keep_alive":"30m"}' \
+                -d '{"model":"llama3.2:1b","prompt":"hi","stream":false,"keep_alive":"30m"}' \
                 > /tmp/ollama-warmup-native.log 2>&1; then
               WARMUP_END=$(date +%s)
               echo "🦙 Native warm-up complete in $(( WARMUP_END - WARMUP_START ))s"
@@ -316,22 +316,34 @@ jobs:
             fi
 
             # Warm-up #2 — hit the EXACT endpoint the agent will use
-            # (OpenAI-compatible /v1/chat/completions). If this hangs or
-            # errors, the chat will hang in the browser too, and we want
-            # to catch that here at workflow-time, not later.
-            echo "🦙 Warm-up #2: OpenAI-compat /v1/chat/completions (agent's real path)..."
+            # (OpenAI-compatible /v1/chat/completions) WITH a tool
+            # definition in the payload. This is critical: the OpenLLM
+            # agent sends ~19 tool schemas on every request, and some
+            # models (e.g. tinyllama, gemma2:2b) return HTTP 400
+            # "does not support tools" when the tools field is present.
+            # A warm-up without tools would pass for those models and
+            # then fail in the browser. This probe catches it here.
+            echo "🦙 Warm-up #2: OpenAI-compat /v1/chat/completions WITH tools (agent's real path)..."
             WARMUP2_START=$(date +%s)
             if curl -fsS --max-time 120 http://localhost:11434/v1/chat/completions \
                 -H 'Content-Type: application/json' \
                 -H 'Authorization: Bearer dummy' \
-                -d '{"model":"tinyllama","messages":[{"role":"user","content":"hi"}],"stream":false}' \
+                -d '{"model":"llama3.2:1b","messages":[{"role":"user","content":"hi"}],"stream":false,"tools":[{"type":"function","function":{"name":"probe","description":"probe","parameters":{"type":"object","properties":{}}}}]}' \
                 > /tmp/ollama-warmup-compat.log 2>&1; then
               WARMUP2_END=$(date +%s)
-              echo "🦙 OpenAI-compat warm-up complete in $(( WARMUP2_END - WARMUP2_START ))s"
+              echo "🦙 OpenAI-compat+tools warm-up complete in $(( WARMUP2_END - WARMUP2_START ))s"
               head -c 500 /tmp/ollama-warmup-compat.log
               echo ""
+              # Extra guard: sniff the response for Ollama's "does not
+              # support tools" error, which returns HTTP 200 in the
+              # streaming path but an error body in the non-streaming path.
+              if grep -q "does not support tools" /tmp/ollama-warmup-compat.log; then
+                echo "❌ Model does not support tools — the agent would fail on every chat"
+                cat /tmp/ollama-warmup-compat.log
+                exit 1
+              fi
             else
-              echo "❌ Ollama OpenAI-compat warm-up (/v1/chat/completions) failed or timed out"
+              echo "❌ Ollama OpenAI-compat+tools warm-up failed or timed out"
               echo "   This is the exact endpoint the agent uses — chat would hang in browser"
               tail -30 /tmp/ollama-warmup-compat.log 2>/dev/null || true
               exit 1
@@ -347,9 +359,9 @@ jobs:
           export CLAUDE_CODE_USE_OPENAI=1
           export OPENAI_BASE_URL="http://localhost:11434/v1"
           export OPENAI_API_KEY="dummy-ollama-no-auth"
-          export OPENAI_MODEL="tinyllama"
+          export OPENAI_MODEL="llama3.2:1b"
           export OPENLLM_PROVIDER="ollama"
-          export OPENLLM_MODEL="tinyllama"
+          export OPENLLM_MODEL="llama3.2:1b"
 
           # Launch the full agent. MUST be `bun`, not `node` — src/web/server.ts
           # uses Bun-native APIs (import.meta.dir, Bun.file, Bun.serve).
