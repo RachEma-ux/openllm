@@ -246,30 +246,29 @@ jobs:
       - name: Start application with tunnel
         if: ${{ github.event.inputs.run_app == 'yes' }}
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.MY_PAT }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
           set -euo pipefail
 
-          echo "🚀 Starting application (provider: alibaba / qwen-plus)..."
+          echo "🚀 Starting application (provider: openai / gpt-5.4-mini)..."
           OLLAMA_PID=""
 
           # Launch the CHAT RELAY (src/web/node-server.ts). It has its
-          # own provider registry and routes chat messages to Alibaba
-          # DashScope's international OpenAI-compatible endpoint when
-          # the client sends provider=alibaba. The default client-side
-          # provider/model in src/web/public/index.html is set to
-          # alibaba/qwen-plus so the first user message routes there
-          # without any manual selection.
+          # own provider registry and routes chat messages to OpenAI
+          # when the client sends provider=openai. The default
+          # client-side provider/model is overridden here via env vars
+          # so the first user message routes to OpenAI without any
+          # manual selection.
           #
-          # DASHSCOPE_API_KEY is already exported via the step-level
-          # env block above. node-server.ts reads it via the "alibaba"
-          # entry in its PROVIDER_REGISTRY.
+          # OPENAI_API_KEY is sourced from the MY_PAT repository secret
+          # (see the env: block above). node-server.ts reads it via the
+          # "openai" entry in its PROVIDER_REGISTRY.
           export OPENLLM_WEB_PORT=5000
-          export OPENLLM_PROVIDER="alibaba"
-          export OPENLLM_MODEL="qwen-plus"
+          export OPENLLM_PROVIDER="openai"
+          export OPENLLM_MODEL="gpt-5.4-mini"
 
           echo "Launching: bun src/web/node-server.ts (chat relay, port 5000)"
           bun src/web/node-server.ts > server.log 2>&1 &
