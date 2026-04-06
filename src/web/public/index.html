@@ -588,6 +588,7 @@ function switchTab(name,el){
 function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,120)+'px'}
 function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}
 let providerStatus={};
+let remoteWsUrl=null;
 function send(){
   const txt=inputEl.value.trim();
   if(!txt)return;
@@ -879,8 +880,6 @@ openChat=function(title){
 }
 
 /* ── Remote Agent Connection ── */
-let remoteWsUrl=null;
-
 function connectRemote(){
   const url=$('#remote-url').value.trim();
   if(!url){alert('Enter a remote URL');return}
