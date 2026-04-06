@@ -454,6 +454,35 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
       </div>
 
       <div class="settings-section">
+        <h3>Provider API Keys</h3>
+        <div style="color:var(--dim);font-size:12px;margin-top:-4px;margin-bottom:10px">Keys are stored locally in your browser (localStorage) and sent with each chat message. They are never saved on the server.</div>
+        <div class="setting-row" style="flex-direction:column;align-items:stretch">
+          <span class="setting-label">Provider</span>
+          <select class="setting-input" id="apikey-provider-sel" onchange="loadApiKeyForProvider()" style="margin-top:6px">
+            <option value="alibaba">Alibaba (Qwen) — DashScope</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="gemini">Google Gemini</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="groq">Groq</option>
+            <option value="mistral">Mistral</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="together">Together</option>
+            <option value="fireworks">Fireworks</option>
+          </select>
+        </div>
+        <div class="setting-row" style="flex-direction:column;align-items:stretch">
+          <span class="setting-label">API Key</span>
+          <input class="setting-input" id="apikey-input" type="password" placeholder="sk-... or your provider's key" autocomplete="off">
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="setting-btn setting-btn-primary" style="flex:1" onclick="saveApiKey()">Save</button>
+            <button class="setting-btn" style="flex:1;background:var(--bg3);color:var(--text)" onclick="clearApiKey()">Clear</button>
+          </div>
+          <span class="setting-value" id="apikey-status" style="margin-top:6px;font-size:12px"></span>
+        </div>
+      </div>
+
+      <div class="settings-section">
         <h3>Remote Deploy</h3>
         <button class="setting-btn setting-btn-primary" onclick="deployAgent()">Deploy Agent to GitHub Actions</button>
         <div style="color:var(--dim);font-size:12px;margin-top:6px">Starts full agent (51 tools) on cloud, connects automatically via tunnel.</div>
@@ -684,16 +713,42 @@ function send(){
     connectWS();
     setTimeout(()=>{
       if(ws&&ws.readyState===1){
-        ws.send(JSON.stringify({type:'message',content:txt,provider:currentProvider,model:currentModel}));
+        ws.send(JSON.stringify({type:'message',content:txt,provider:currentProvider,model:currentModel,apiKey:getApiKey(currentProvider)}));
         appendMsg('bot','✓ Reconnected, sending...');
       }
     },2000);
     return;
   }
-  if(providerStatus[currentProvider]===false){appendMsg('user',txt);appendMsg('bot','Error: No API key for '+currentProvider+'. Use Ollama (local) or set the env var.');inputEl.value='';return}
   appendMsg('user',txt);
   inputEl.value='';inputEl.style.height='auto';
-  ws.send(JSON.stringify({type:'message',content:txt,provider:currentProvider,model:currentModel}));
+  ws.send(JSON.stringify({type:'message',content:txt,provider:currentProvider,model:currentModel,apiKey:getApiKey(currentProvider)}));
+}
+
+/* ── Provider API Keys (localStorage) ── */
+function getApiKey(provider){ return localStorage.getItem('openllm-apikey-'+provider) || ''; }
+function loadApiKeyForProvider(){
+  const sel=$('#apikey-provider-sel'); const inp=$('#apikey-input'); const st=$('#apikey-status');
+  if(!sel||!inp) return;
+  const p=sel.value; const k=getApiKey(p);
+  inp.value=k;
+  if(st) st.textContent = k ? '● Key saved locally' : '○ No key set for this provider';
+  if(st) st.style.color = k ? 'var(--green)' : 'var(--dim)';
+}
+function saveApiKey(){
+  const sel=$('#apikey-provider-sel'); const inp=$('#apikey-input'); const st=$('#apikey-status');
+  if(!sel||!inp) return;
+  const p=sel.value; const k=inp.value.trim();
+  if(!k){ if(st){st.textContent='⚠ Key is empty — nothing saved';st.style.color='var(--yellow)';} return; }
+  localStorage.setItem('openllm-apikey-'+p, k);
+  if(st){st.textContent='✓ Saved for '+p;st.style.color='var(--green)';}
+}
+function clearApiKey(){
+  const sel=$('#apikey-provider-sel'); const inp=$('#apikey-input'); const st=$('#apikey-status');
+  if(!sel||!inp) return;
+  const p=sel.value;
+  localStorage.removeItem('openllm-apikey-'+p);
+  inp.value='';
+  if(st){st.textContent='○ Cleared for '+p;st.style.color='var(--dim)';}
 }
 
 /* ── Messages ── */
@@ -838,7 +893,12 @@ function addProject(){
 /* ── Boot ── */
 renderAvatars();
 renderHome();
-selectProvider('ollama');
+selectProvider('alibaba');
+// Sync the Settings → Provider API Keys dropdown to the active provider
+setTimeout(()=>{
+  const sel=$('#apikey-provider-sel');
+  if(sel){ sel.value=currentProvider; loadApiKeyForProvider(); }
+},50);
 // Restore remote URL from localStorage
 remoteWsUrl=null;
 const savedRemote=localStorage.getItem('openllm-remote-url');

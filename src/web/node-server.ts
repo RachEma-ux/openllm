@@ -173,10 +173,12 @@ function getConversation(provider: string, model: string) {
   return msgs
 }
 
-async function streamLLM(prompt: string, provider: string, model: string, broadcast: (msg: any) => void): Promise<void> {
+async function streamLLM(prompt: string, provider: string, model: string, broadcast: (msg: any) => void, overrideApiKey?: string): Promise<void> {
   const cfg = PROVIDER_REGISTRY[provider] || PROVIDER_REGISTRY.ollama
   const baseUrl = cfg.baseUrl
-  const apiKey = cfg.apiKey
+  // Client-provided key (from Settings UI) overrides the server env var.
+  // If client sends one, use it — otherwise fall back to the env-var key.
+  const apiKey = (overrideApiKey && overrideApiKey.trim()) || cfg.apiKey
   const llmModel = model || cfg.defaultModel
 
   const history = getConversation(provider, llmModel)
@@ -190,7 +192,7 @@ async function streamLLM(prompt: string, provider: string, model: string, broadc
   let fullReply = ''
 
   if (!apiKey && provider !== 'ollama' && provider !== 'lmstudio' && provider !== 'atomic-chat') {
-    broadcast({ type: 'error', message: `No API key configured for ${provider}. Set ${provider.toUpperCase()}_API_KEY env var.` })
+    broadcast({ type: 'error', message: `No API key for ${provider}. Open Settings → Provider API Keys and paste one.` })
     broadcast({ type: 'done', usage })
     return
   }
@@ -293,8 +295,12 @@ async function main() {
         } else if (msg.type === 'message' && msg.content) {
           const provider = msg.provider || 'ollama'
           const model = msg.model || ''
-          console.log(`[llm] ${provider}/${model || '(default)'}: ${msg.content.slice(0, 60)}...`)
-          await streamLLM(msg.content, provider, model, broadcast)
+          // Client may include an apiKey in the WS payload (entered in
+          // Settings → Provider API Keys, persisted in localStorage).
+          // It takes precedence over any env-var key on the server side.
+          const clientApiKey = typeof msg.apiKey === 'string' ? msg.apiKey : ''
+          console.log(`[llm] ${provider}/${model || '(default)'} ${clientApiKey ? '(client key)' : '(env key)'}: ${msg.content.slice(0, 60)}...`)
+          await streamLLM(msg.content, provider, model, broadcast, clientApiKey)
         }
       } catch (e: any) {
         try { ws.send(JSON.stringify({ type: 'error', message: e.message })) } catch {}

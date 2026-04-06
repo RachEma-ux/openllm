@@ -234,18 +234,13 @@ jobs:
             "checksums.sha256"
 
       # ========== RUN PHASE (Optional) ==========
-      - name: Pre-flight — DASHSCOPE_API_KEY must be present
-        if: ${{ github.event.inputs.run_app == 'yes' }}
-        env:
-          DASHSCOPE_API_KEY_SECRET: ${{ secrets.DASHSCOPE_API_KEY }}
-        run: |
-          if [ -z "${DASHSCOPE_API_KEY_SECRET:-}" ]; then
-            echo "::error::DASHSCOPE_API_KEY repo secret is missing or empty"
-            echo "   Set it at: https://github.com/${{ github.repository }}/settings/secrets/actions"
-            echo "   Get a key at: https://dashscope.console.aliyun.com (international endpoint)"
-            exit 1
-          fi
-          echo "✅ DASHSCOPE_API_KEY secret is set"
+      # NOTE: there is no pre-flight API-key check. The chat relay
+      # (src/web/node-server.ts) accepts a per-request `apiKey` field
+      # in the WebSocket payload — the user pastes their key into
+      # Settings → Provider API Keys in the web UI and it's stored in
+      # the browser's localStorage and sent with every chat message.
+      # Any repo secrets (OPENAI_API_KEY, DASHSCOPE_API_KEY, etc.)
+      # still work as a fallback if the client sends no key.
 
       - name: Install cloudflared
         if: ${{ github.event.inputs.run_app == 'yes' }}
