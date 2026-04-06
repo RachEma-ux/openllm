@@ -1120,8 +1120,28 @@ window.addEventListener('beforeinstallprompt', (e) => {
 
 /* ── Service Worker ── */
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').then(() => {
+  navigator.serviceWorker.register('/sw.js').then((reg) => {
     console.log('[pwa] Service worker registered');
+    // Check for updates every time the page loads
+    reg.update();
+    // Auto-reload when a new SW takes control
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
+    // When a new SW is waiting, activate it immediately
+    reg.addEventListener('updatefound', () => {
+      const newSW = reg.installing;
+      if (newSW) {
+        newSW.addEventListener('statechange', () => {
+          if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
+            newSW.postMessage({ type: 'SKIP_WAITING' });
+          }
+        });
+      }
+    });
   }).catch((e) => {
     console.warn('[pwa] SW registration failed:', e);
   });
