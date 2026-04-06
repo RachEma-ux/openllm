@@ -1,692 +1,457 @@
-# =============================================================================
-#  Builder Deploy — OpenLLM ephemeral live tunnel (v3)
-# =============================================================================
-#
-#  Purpose
-#  -------
-#  Produce a publicly reachable URL where a user can open the OpenLLM chat UI
-#  and talk to one of three providers. The workflow is intentionally ephemeral:
-#  no release, no versioning, no packaging. Every run is throwaway.
-#
-#  Supported providers (all routed through Claude Code's OpenAI-compatible
-#  transport — there is no separate SDK path per provider):
-#      - ollama    (local llama.cpp via Ollama on the runner)
-#      - openai    (api.openai.com)
-#      - alibaba   (dashscope international, OpenAI-compatible endpoint)
-#
-#  Design constraints (non-negotiable — see AGENTS.md team model):
-#    1. Single workflow, single job.
-#    2. No matrix. No reusable workflow_call. No composite action indirection.
-#    3. Fail loud — every real failure exits 1 with the real reason.
-#    4. No silent fallback. No automatic provider switching. No retry loops.
-#    5. One live tunnel URL is the only runtime access point.
-#    6. The URL is published to a gist AND printed in the Actions banner.
-#    7. Sentinel observability is mandatory while live:
-#         - `tail -F server.log` streams into the Actions log
-#         - `/api/sentinel` endpoint is verified before publishing the URL
-#    8. Provider is a first-class workflow_dispatch input.
-#    9. The /api/health provider field MUST match the workflow input — this
-#       catches CLAUDE_CODE_USE_* / OPENLLM_PROVIDER drift in one step instead
-#       of surfacing as a runtime hallucination.
-#
-#  Hard out-of-scope (do not add any of these without a spec change):
-#    - anthropic / gemini / any other provider branch
-#    - release / version / pack archive logic
-#    - smoke tests, unit tests, lint, format, PR gates
-#    - rebrand step
-#    - provider caching / fallback / retry
-# =============================================================================
-
 name: Builder Deploy
 
 on:
   workflow_dispatch:
     inputs:
+      version:
+        description: 'Version (auto = auto-increment, or specify like 1.0.0)'
+        required: false
+        default: 'auto'
+      run_app:
+        description: 'Start app with public URL after deploy?'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
       duration:
-        description: "How long to keep the tunnel alive (minutes)"
+        description: 'How long to keep app running (minutes)'
         required: true
-        default: "30"
+        default: '15'
         type: choice
         options:
-          - "5"
-          - "10"
-          - "15"
-          - "30"
-      provider:
-        description: "LLM provider to serve"
-        required: true
-        default: "ollama"
-        type: choice
-        options:
-          - ollama
-          - openai
-          - alibaba
-      model:
-        description: "Model override (leave empty to use provider default)"
-        required: false
-        default: ""
-        type: string
-      debug:
-        description: "Raise SENTINEL_LEVEL to 'debug' for verbose observability"
-        required: false
-        default: false
-        type: boolean
+          - '5'
+          - '10'
+          - '15'
+          - '30'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
-      # -----------------------------------------------------------------------
-      # Step 1 — Reset gist to pending
-      # -----------------------------------------------------------------------
-      # We mark the shared status gist as "pending" at the very start so that
-      # any phone/dashboard polling the gist sees "something is happening" and
-      # does not act on a stale tunnel URL from a previous run.
-      #
-      # This step must NEVER fail the run. Gist availability is best-effort.
-      - name: Reset gist to pending
-        env:
-          GIST_ID: ${{ vars.TUNNEL_GIST_ID }}
-          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+      - name: Reset Gist status to pending
         run: |
-          set -Eeuo pipefail
-          if [ -z "${GIST_TOKEN:-}" ] || [ -z "${GIST_ID:-}" ]; then
-            echo "::notice::GIST_TOKEN or TUNNEL_GIST_ID not configured — skipping gist reset"
-            exit 0
+          echo "🔄 Resetting Gist tunnel status..."
+          GIST_ID="${{ vars.TUNNEL_GIST_ID }}"
+          GIST_TOKEN="${{ secrets.GIST_TOKEN }}"
+
+          if [ -n "$GIST_TOKEN" ] && [ -n "$GIST_ID" ]; then
+            TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            GIST_JSON=$(jq -n \
+              --arg rid "${{ github.run_id }}" \
+              --arg repo "${{ github.repository }}" \
+              --arg ts "$TIMESTAMP" \
+              '{tunnel_url: null, version: null, run_id: $rid, repository: $repo, status: "pending", started_at: $ts, deploy_type: null}')
+
+            PAYLOAD=$(jq -n --arg content "$GIST_JSON" '{files: {"tunnel-status.json": {content: $content}}}')
+
+            curl -s -X PATCH "https://api.github.com/gists/$GIST_ID" \
+              -H "Authorization: Bearer $GIST_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -d "$PAYLOAD" > /dev/null && echo "✅ Gist reset to pending" || echo "⚠️ Gist reset failed"
+          else
+            echo "⚠️ GIST_TOKEN or TUNNEL_GIST_ID not configured"
           fi
-          TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          PAYLOAD=$(jq -n \
-            --arg rid  "${{ github.run_id }}" \
-            --arg repo "${{ github.repository }}" \
-            --arg ts   "$TS" \
-            '{tunnel_url: null, tunnel_password: null, provider: null, model: null, run_id: $rid, repository: $repo, status: "pending", started_at: $ts}')
-          BODY=$(jq -n --arg content "$PAYLOAD" '{files: {"tunnel-status.json": {content: $content}}}')
-          curl -sS -X PATCH "https://api.github.com/gists/$GIST_ID" \
-            -H "Authorization: Bearer $GIST_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -d "$BODY" > /dev/null && echo "Gist reset to pending" || echo "::warning::gist reset failed (non-fatal)"
 
-      # -----------------------------------------------------------------------
-      # Step 2 — Pre-flight provider + secret validation
-      # -----------------------------------------------------------------------
-      # Catch misconfiguration BEFORE wasting build/runtime minutes. Each
-      # provider has different secret requirements; missing secrets are a hard
-      # fail with an explicit message. Unknown providers (defensive; the
-      # dispatch UI only allows 3 values) also fail loudly.
-      - name: Pre-flight secret + provider validation
-        env:
-          OPENAI_API_KEY_SECRET: ${{ secrets.OPENAI_API_KEY }}
-          DASHSCOPE_API_KEY_SECRET: ${{ secrets.DASHSCOPE_API_KEY }}
-          INPUT_PROVIDER: ${{ github.event.inputs.provider }}
-        run: |
-          set -Eeuo pipefail
-          echo "Provider requested: $INPUT_PROVIDER"
-          case "$INPUT_PROVIDER" in
-            ollama)
-              echo "ollama — no secret required"
-              ;;
-            openai)
-              if [ -z "${OPENAI_API_KEY_SECRET:-}" ]; then
-                echo "::error::provider=openai but OPENAI_API_KEY secret is missing or empty"
-                exit 1
-              fi
-              echo "openai — OPENAI_API_KEY secret present"
-              ;;
-            alibaba)
-              if [ -z "${DASHSCOPE_API_KEY_SECRET:-}" ]; then
-                echo "::error::provider=alibaba but DASHSCOPE_API_KEY secret is missing or empty"
-                exit 1
-              fi
-              echo "alibaba — DASHSCOPE_API_KEY secret present"
-              ;;
-            *)
-              echo "::error::Unknown provider '$INPUT_PROVIDER' — expected one of: ollama, openai, alibaba"
-              exit 1
-              ;;
-          esac
-
-      # -----------------------------------------------------------------------
-      # Step 3 — Checkout
-      # -----------------------------------------------------------------------
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # -----------------------------------------------------------------------
-      # Step 4 — Setup Bun (pinned)
-      # -----------------------------------------------------------------------
-      # The OpenLLM web server (src/web/server.ts) uses Bun-native APIs
-      # (import.meta.dir, Bun.file, Bun.serve). Running the bundled dist/cli.mjs
-      # under Node crashes at boot with "paths[0] must be of type string".
-      # Bun is mandatory at runtime, not optional.
+      - name: Determine version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          INPUT_VERSION="${{ github.event.inputs.version }}"
+          INPUT_VERSION="${INPUT_VERSION#v}"
+
+          if echo "$INPUT_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "📦 Redeploying existing version: v${INPUT_VERSION}"
+            echo "VERSION=${INPUT_VERSION}" >> $GITHUB_OUTPUT
+            echo "REDEPLOY=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "🔍 Auto-detecting latest version and incrementing..."
+          LATEST=$(gh release list --repo "${{ github.repository }}" --limit 100 --json tagName --jq '.[].tagName' | sed 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+
+          if [ -z "$LATEST" ]; then
+            NEW_VERSION="1.0.0"
+            echo "📦 No existing releases → Starting at v${NEW_VERSION}"
+          else
+            MAJOR=$(echo "$LATEST" | cut -d. -f1)
+            MINOR=$(echo "$LATEST" | cut -d. -f2)
+            PATCH=$(echo "$LATEST" | cut -d. -f3)
+            NEW_PATCH=$((PATCH + 1))
+            NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+            echo "📦 Latest: v${LATEST} → New: v${NEW_VERSION}"
+          fi
+
+          echo "VERSION=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "REDEPLOY=false" >> $GITHUB_OUTPUT
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.3.11"
+          bun-version: '1.3.11'
 
-      # -----------------------------------------------------------------------
-      # Step 5 — Install dependencies
-      # -----------------------------------------------------------------------
+      # ========== BUILD PHASE ==========
       - name: Install dependencies
         run: |
-          set -Eeuo pipefail
+          echo "📦 Installing dependencies..."
           bun install --frozen-lockfile
 
-      # -----------------------------------------------------------------------
-      # Step 6 — Build
-      # -----------------------------------------------------------------------
-      # `bun run build` produces dist/cli.mjs (the bundled full agent). If this
-      # file is missing after the build, the bundle is broken and nothing
-      # downstream can run.
-      - name: Build
+      - name: Build application
         run: |
-          set -Eeuo pipefail
+          echo "🔨 Building application..."
           bun run build
           if [ ! -f dist/cli.mjs ]; then
-            echo "::error::Build completed but dist/cli.mjs is missing"
+            echo "❌ Build completed but dist/cli.mjs is missing"
             ls -lh dist/ || true
             exit 1
           fi
-          echo "dist/cli.mjs present ($(du -h dist/cli.mjs | cut -f1))"
 
-      # -----------------------------------------------------------------------
-      # Step 7 — Stage UI assets
-      # -----------------------------------------------------------------------
-      # server.ts resolves PUBLIC_DIR via `resolve(import.meta.dir, 'public')`.
-      # Inside the bundled dist/cli.mjs that becomes dist/public, which
-      # `bun run build` does NOT produce. Without this copy the UI serves the
-      # "Web UI not installed" placeholder.
       - name: Stage UI assets
         run: |
-          set -Eeuo pipefail
-          if [ ! -d src/web/public ]; then
-            echo "::error::src/web/public is missing — the UI cannot be staged"
-            exit 1
-          fi
+          echo "🎨 Staging web UI assets..."
           rm -rf dist/public
           cp -r src/web/public dist/public
           if [ ! -f dist/public/index.html ]; then
-            echo "::error::dist/public/index.html missing after stage — copy failed"
+            echo "❌ dist/public/index.html missing after stage"
             exit 1
           fi
-          # Content sanity check — guards against committing a stub or
-          # truncated placeholder. The real index.html is ~68 KB and
-          # contains the <title>OpenLLM</title> tag and a WebSocket ref.
-          # Minimum size of 10 KB catches obvious breakage without being
-          # fragile to normal UI edits.
-          INDEX_SIZE=$(/usr/bin/stat -c '%s' dist/public/index.html 2>/dev/null || /usr/bin/stat -f '%z' dist/public/index.html 2>/dev/null || echo 0)
-          if [ "$INDEX_SIZE" -lt 10240 ]; then
-            echo "::error::dist/public/index.html is only ${INDEX_SIZE} bytes (expected >= 10240) — stub or truncation detected"
-            exit 1
-          fi
-          if ! grep -qF '<title>OpenLLM</title>' dist/public/index.html; then
-            echo "::error::dist/public/index.html missing <title>OpenLLM</title> marker — not the real UI"
-            exit 1
-          fi
-          if ! grep -qF 'WebSocket' dist/public/index.html; then
-            echo "::error::dist/public/index.html missing WebSocket reference — UI is not chat-capable"
-            exit 1
-          fi
-          echo "UI sanity OK: ${INDEX_SIZE} bytes, title + WebSocket markers present"
-          echo "Staged $(find dist/public -type f | wc -l) UI files into dist/public"
 
-      # -----------------------------------------------------------------------
-      # Step 8 — Install Ollama (conditional)
-      # -----------------------------------------------------------------------
-      # Only runs for provider=ollama. Installs Ollama, pulls the resolved
-      # model, and verifies `ollama list` reports it. Any failure is fatal —
-      # no fallback to another provider, no retries.
-      - name: Install Ollama and pull model
-        if: ${{ github.event.inputs.provider == 'ollama' }}
-        env:
-          INPUT_MODEL: ${{ github.event.inputs.model }}
+      # ========== PACK PHASE ==========
+      - name: Create pack structure
         run: |
-          set -Eeuo pipefail
-          RESOLVED_MODEL="${INPUT_MODEL:-llama3.2:3b}"
-          echo "Installing Ollama (resolved_model=$RESOLVED_MODEL)"
-          curl -fsSL https://ollama.com/install.sh | sh
-          ollama serve > /tmp/ollama.log 2>&1 &
-          for i in $(seq 1 15); do
-            if curl -fsS http://localhost:11434/api/tags > /dev/null 2>&1; then
-              echo "ollama daemon up (attempt $i)"
-              break
-            fi
-            sleep 2
-          done
-          echo "Pulling $RESOLVED_MODEL"
-          ollama pull "$RESOLVED_MODEL"
-          echo "Verifying $RESOLVED_MODEL is in ollama list"
-          # grep -F = fixed-string match (not regex). Needed because model
-          # names like `llama3.2` contain `.` which is a regex metacharacter.
-          MODEL_BASE=$(echo "$RESOLVED_MODEL" | cut -d: -f1)
-          if ! ollama list | grep -qF "$MODEL_BASE"; then
-            echo "::error::Ollama model $RESOLVED_MODEL not found in 'ollama list' after pull"
-            ollama list || true
-            cat /tmp/ollama.log || true
-            exit 1
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          PACK_NAME="openllm"
+          PACK_DIR="pack-output"
+
+          echo "📁 Creating pack structure..."
+          mkdir -p "$PACK_DIR"
+
+          cp dist/cli.mjs "$PACK_DIR/" 2>/dev/null || true
+          cp -r dist/public "$PACK_DIR/public" 2>/dev/null || true
+
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          jq -n \
+            --arg id "$PACK_NAME" \
+            --arg version "$VERSION" \
+            --arg sha "${{ github.sha }}" \
+            --arg time "$BUILD_TIME" \
+            '{
+              pack_version: 1,
+              id: $id,
+              name: "OpenLLM",
+              version: $version,
+              type: "agent",
+              entry: "cli.mjs",
+              description: "Claude Code opened to any LLM (ollama / openai-compatible)",
+              build: {
+                git_sha: $sha,
+                built_at: $time,
+                runtime: "bun",
+                bun_version: "1.3.11"
+              },
+              scripts: {
+                start: "bun cli.mjs serve 5000",
+                health: "/api/health"
+              }
+            }' > "$PACK_DIR/pack.json"
+
+          cat "$PACK_DIR/pack.json"
+
+      - name: Generate checksums
+        run: |
+          cd pack-output
+          find . -type f ! -name "checksums.sha256" -exec sha256sum {} \; > checksums.sha256
+
+      - name: Create pack archive
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          PACK_NAME="openllm"
+          ARCHIVE_NAME="pack-${PACK_NAME}-v${VERSION}.zip"
+
+          cd pack-output
+          zip -r "../$ARCHIVE_NAME" .
+          cd ..
+
+          echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_ENV
+          echo "📦 Created: $ARCHIVE_NAME ($(du -h "$ARCHIVE_NAME" | cut -f1))"
+
+      # ========== RELEASE PHASE ==========
+      - name: Delete existing release
+        continue-on-error: true
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          RELEASE_ID=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/v${VERSION}" \
+            | jq -r '.id // empty')
+
+          if [ -n "$RELEASE_ID" ] && [ "$RELEASE_ID" != "null" ]; then
+            echo "Deleting existing release v${VERSION}..."
+            curl -X DELETE -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/${RELEASE_ID}"
+            curl -X DELETE -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/git/refs/tags/v${VERSION}" || true
           fi
+
+      - name: Generate release checksum
+        run: |
+          sha256sum "${{ env.ARCHIVE_NAME }}" > checksums.sha256
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          gh release create "v${VERSION}" \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "OpenLLM v${VERSION}" \
+            --notes "$(cat <<EOF
+          ## OpenLLM v${VERSION}
+
+          **Automated deployment from Builder**
+
+          ### Build Info
+          - Git SHA: ${{ github.sha }}
+          - Runtime: Bun 1.3.11
+          - Built: $(date -u +"%Y-%m-%d %H:%M UTC")
+          EOF
+          )" \
+            "${{ env.ARCHIVE_NAME }}" \
+            "checksums.sha256"
+
+      # ========== RUN PHASE (Optional) ==========
+      - name: Install Ollama and pull model
+        if: ${{ github.event.inputs.run_app == 'yes' }}
+        continue-on-error: true
+        run: |
+          echo "🦙 Installing Ollama..."
+          for i in 1 2 3; do
+            curl -fsSL https://ollama.com/install.sh | sh && break
+            echo "⚠️ Ollama install attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+
+          echo "🦙 Starting Ollama server for model pull..."
+          ollama serve &
+          OLLAMA_PID=$!
+          sleep 5
+
+          echo "🦙 Pulling llama3.2:3b..."
+          ollama pull llama3.2:3b
+
+          echo "🦙 Available models:"
           ollama list
 
-      # -----------------------------------------------------------------------
-      # Step 9 — Launch agent + tunnel (the core runtime step)
-      # -----------------------------------------------------------------------
-      # This step implements the 16-sub-step runtime contract in strict order.
-      # Cleanup is registered via `trap` so it runs on every exit path
-      # (success, failure, cancellation, ctrl-C, shell error).
-      - name: Launch agent + tunnel
-        env:
-          INPUT_PROVIDER: ${{ github.event.inputs.provider }}
-          INPUT_MODEL: ${{ github.event.inputs.model }}
-          INPUT_DURATION: ${{ github.event.inputs.duration }}
-          INPUT_DEBUG: ${{ github.event.inputs.debug }}
-          OPENAI_API_KEY_SECRET: ${{ secrets.OPENAI_API_KEY }}
-          DASHSCOPE_API_KEY_SECRET: ${{ secrets.DASHSCOPE_API_KEY }}
-          GIST_ID: ${{ vars.TUNNEL_GIST_ID }}
-          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
-          GH_RUN_ID: ${{ github.run_id }}
-          GH_REPO: ${{ github.repository }}
+          kill $OLLAMA_PID 2>/dev/null || true
+          sleep 2
+
+      - name: Install cloudflared
+        if: ${{ github.event.inputs.run_app == 'yes' }}
         run: |
-          set -Eeuo pipefail
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+          chmod +x cloudflared
 
-          # -------- 9.1  Export provider-specific env vars --------
-          # Every provider uses Claude Code's OpenAI-compatible transport:
-          #   CLAUDE_CODE_USE_OPENAI=1
-          # Only OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL vary.
-          # OPENLLM_PROVIDER + OPENLLM_MODEL are also exported because
-          # /api/health reads its `provider` label from OPENLLM_PROVIDER
-          # (src/web/server.ts getProviderInfo). The mandatory provider-match
-          # check at step 9.8 depends on these labels.
-          case "$INPUT_PROVIDER" in
-            ollama)
-              RESOLVED_MODEL="${INPUT_MODEL:-llama3.2:3b}"
-              export CLAUDE_CODE_USE_OPENAI=1
-              export OPENAI_BASE_URL="http://localhost:11434/v1"
-              export OPENAI_API_KEY="dummy"
-              export OPENAI_MODEL="$RESOLVED_MODEL"
-              export OPENLLM_PROVIDER="ollama"
-              export OPENLLM_MODEL="$RESOLVED_MODEL"
-              ;;
-            openai)
-              RESOLVED_MODEL="${INPUT_MODEL:-gpt-4o-mini}"
-              export CLAUDE_CODE_USE_OPENAI=1
-              unset OPENAI_BASE_URL
-              export OPENAI_API_KEY="$OPENAI_API_KEY_SECRET"
-              export OPENAI_MODEL="$RESOLVED_MODEL"
-              export OPENLLM_PROVIDER="openai"
-              export OPENLLM_MODEL="$RESOLVED_MODEL"
-              ;;
-            alibaba)
-              RESOLVED_MODEL="${INPUT_MODEL:-qwen-plus}"
-              export CLAUDE_CODE_USE_OPENAI=1
-              export OPENAI_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-              export OPENAI_API_KEY="$DASHSCOPE_API_KEY_SECRET"
-              export OPENAI_MODEL="$RESOLVED_MODEL"
-              export OPENLLM_PROVIDER="alibaba"
-              export OPENLLM_MODEL="$RESOLVED_MODEL"
-              ;;
-            *)
-              echo "::error::Unknown provider '$INPUT_PROVIDER' in launch step"
-              exit 1
-              ;;
-          esac
-          echo "Resolved model: $RESOLVED_MODEL"
+      - name: Start application with tunnel
+        if: ${{ github.event.inputs.run_app == 'yes' }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: |
+          set -euo pipefail
 
-          # -------- 9.2  Export SENTINEL_LEVEL --------
-          if [ "$INPUT_DEBUG" = "true" ]; then
-            export SENTINEL_LEVEL="debug"
-          else
-            export SENTINEL_LEVEL="info"
-          fi
-          echo "SENTINEL_LEVEL=$SENTINEL_LEVEL"
+          echo "🚀 Starting application..."
 
-          # -------- 9.3  cd to the repo root --------
-          cd "$GITHUB_WORKSPACE"
-
-          # -------- 9.3b  Ollama backend liveness check (ollama branch only) --------
-          # GUARD for the "agent-label lies about a dead backend" failure mode:
-          # /api/health reports provider=ollama based on OPENLLM_PROVIDER alone,
-          # so a healthy-looking agent can silently point at a dead Ollama
-          # daemon. Verify the daemon itself is answering BEFORE we launch
-          # the agent. Catches the rare but real case where `ollama serve`
-          # from step 8 didn't survive the inter-step transition.
-          if [ "$INPUT_PROVIDER" = "ollama" ]; then
-            if ! curl -fsS --max-time 5 http://localhost:11434/api/tags > /dev/null 2>&1; then
-              echo "::error::Ollama daemon at http://localhost:11434 is unreachable at launch time (ollama branch)"
-              exit 1
-            fi
-            echo "ollama daemon reachable at localhost:11434"
-          fi
-
-          # -------- 9.4  Pre-create server.log (so tail -F doesn't race) --------
-          : > server.log
-          : > tunnel.log
-
-          # -------- Register cleanup trap BEFORE launching children --------
-          # Order (per spec): tunnel -> agent -> sentinel tail.
-          # Trap runs on EXIT, ERR, INT, TERM so any exit path cleans up.
-          SERVER_PID=""
-          TUNNEL_PID=""
-          SENTINEL_PID=""
-          cleanup() {
-            set +e
-            echo ""
-            echo "== cleanup =="
-            # Send SIGTERM first, wait a short grace period, then SIGKILL.
-            # Never `wait` — some Node processes ignore SIGTERM and `wait`
-            # would block until the step timeout, defeating cleanup entirely.
-            # Kill order per spec: tunnel -> agent -> sentinel tail.
-            if [ -n "$TUNNEL_PID" ]; then
-              echo "killing tunnel pid=$TUNNEL_PID (TERM)"
-              kill -TERM "$TUNNEL_PID" 2>/dev/null || true
-            fi
-            if [ -n "$SERVER_PID" ]; then
-              echo "killing agent pid=$SERVER_PID (TERM)"
-              kill -TERM "$SERVER_PID" 2>/dev/null || true
-            fi
-            if [ -n "$SENTINEL_PID" ]; then
-              echo "killing sentinel tail pid=$SENTINEL_PID (TERM)"
-              kill -TERM "$SENTINEL_PID" 2>/dev/null || true
-            fi
-            sleep 2
-            # Escalate to SIGKILL for any survivor. Same order.
-            if [ -n "$TUNNEL_PID" ] && kill -0 "$TUNNEL_PID" 2>/dev/null; then
-              echo "escalating tunnel pid=$TUNNEL_PID (KILL)"
-              kill -9 "$TUNNEL_PID" 2>/dev/null || true
-            fi
-            if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
-              echo "escalating agent pid=$SERVER_PID (KILL)"
-              kill -9 "$SERVER_PID" 2>/dev/null || true
-            fi
-            if [ -n "$SENTINEL_PID" ] && kill -0 "$SENTINEL_PID" 2>/dev/null; then
-              echo "escalating sentinel tail pid=$SENTINEL_PID (KILL)"
-              kill -9 "$SENTINEL_PID" 2>/dev/null || true
-            fi
-          }
-          trap cleanup EXIT INT TERM
-
-          # -------- 9.5  Start Sentinel tail --------
-          # tail -F follows renames/truncations and waits for the file to
-          # exist, so any lines the agent writes show up in the Actions log
-          # live (within the constraint that Actions buffers in-progress step
-          # stdout until step end; the /api/sentinel endpoint is the true
-          # live read path — this tail is for the persisted post-mortem trail).
-          ( tail -F server.log 2>/dev/null ) &
-          SENTINEL_PID=$!
-          echo "sentinel tail started pid=$SENTINEL_PID"
-
-          # -------- 9.6  Launch the full agent --------
-          # MUST be `bun`, NOT `node` — src/web/server.ts is Bun-native.
-          # Port 5000 is the documented default (src/web/types.ts range 5000-5999).
-          # Redirect is `>>` (append) not `>` — we already pre-created an
-          # empty server.log at 9.4, and the tail -F is already following
-          # it. Truncating again with `>` would create a brief race where
-          # tail could miss boot lines during the inode swap.
-          echo "launching: bun dist/cli.mjs serve 5000"
-          bun dist/cli.mjs serve 5000 >> server.log 2>&1 &
-          SERVER_PID=$!
-          echo "agent pid=$SERVER_PID"
-
-          # -------- 9.7  Health wait (up to 180s) --------
-          HEALTH_OK="false"
-          HEALTH_BODY=""
-          for attempt in $(seq 1 60); do
-            if HEALTH_BODY=$(curl -fsS --max-time 3 http://localhost:5000/api/health 2>/dev/null); then
-              HEALTH_OK="true"
-              echo "health OK on attempt $attempt: $HEALTH_BODY"
-              break
-            fi
+          # Start Ollama server (model already pulled)
+          OLLAMA_PID=""
+          if command -v ollama &>/dev/null; then
+            echo "🦙 Starting Ollama server..."
+            ollama serve &
+            OLLAMA_PID=$!
             sleep 3
-          done
-          if [ "$HEALTH_OK" != "true" ]; then
-            echo "::error::/api/health did not return 200 within 180s"
-            echo "---- server.log (full) ----"
-            cat server.log || true
-            echo "---- end server.log ----"
-            exit 1
+          else
+            echo "⚠️ Ollama not available — skipping local LLM"
           fi
 
-          # -------- 9.8  Provider match check (MANDATORY) --------
-          # Parse the provider field from /api/health and assert it equals
-          # INPUT_PROVIDER. This single check catches every provider-routing
-          # env var drift bug in one place. If the agent reports a different
-          # provider than we asked for, the runtime will hallucinate the
-          # wrong backend — fail immediately with both values + log dump.
-          REPORTED_PROVIDER=$(echo "$HEALTH_BODY" | jq -r '.provider // "unknown"')
-          echo "requested_provider=$INPUT_PROVIDER reported_provider=$REPORTED_PROVIDER"
-          if [ "$REPORTED_PROVIDER" != "$INPUT_PROVIDER" ]; then
-            echo "::error::Provider mismatch: workflow asked for '$INPUT_PROVIDER' but /api/health reports '$REPORTED_PROVIDER'"
-            echo "---- server.log (full) ----"
-            cat server.log || true
-            echo "---- end server.log ----"
-            exit 1
-          fi
+          # Provider routing — Claude Code OpenAI-compatible transport.
+          # CLAUDE_CODE_USE_OPENAI=1 is REQUIRED; without it the agent
+          # throws "ANTHROPIC_API_KEY required" on the first chat message
+          # because CI=true enters the Anthropic-auth branch.
+          export CLAUDE_CODE_USE_OPENAI=1
+          export OPENAI_BASE_URL="http://localhost:11434/v1"
+          export OPENAI_API_KEY="dummy-ollama-no-auth"
+          export OPENAI_MODEL="llama3.2:3b"
+          export OPENLLM_PROVIDER="ollama"
+          export OPENLLM_MODEL="llama3.2:3b"
 
-          # -------- 9.9  Capability verify — /api/sentinel must exist --------
-          # The /api/sentinel endpoint only exists in the full-agent build
-          # with the Sentinel instrumentation. An empty body or 404 means we
-          # are running an older/stub build and observability is dead. Fail.
-          SENTINEL_BODY=""
-          if ! SENTINEL_BODY=$(curl -fsS --max-time 5 "http://localhost:5000/api/sentinel?tail=10" 2>/dev/null); then
-            echo "::error::/api/sentinel endpoint not reachable (404 or error) — stub/old build detected"
-            exit 1
-          fi
-          if [ -z "$SENTINEL_BODY" ]; then
-            echo "::error::/api/sentinel returned an empty body — stub/old build detected"
-            exit 1
-          fi
-          echo "/api/sentinel returned $(echo "$SENTINEL_BODY" | wc -l) lines — full-agent build confirmed"
+          # Launch the full agent. MUST be `bun`, not `node` — src/web/server.ts
+          # uses Bun-native APIs (import.meta.dir, Bun.file, Bun.serve).
+          echo "Launching: bun dist/cli.mjs serve 5000"
+          bun dist/cli.mjs serve 5000 > server.log 2>&1 &
+          SERVER_PID=$!
 
-          # -------- 9.10  Pre-warm localtunnel via npx --------
-          # cloudflared quick tunnel (trycloudflare.com) was tested TWICE
-          # in this session — commits 9a6b750-era (natural emergence) and
-          # e0f11ce (explicit re-test with the handshake guard). Both
-          # times the /ws upgrade through *.trycloudflare.com returned:
-          #   HTTP/2 500
-          #   "The server returned HTTP status 101, which is not currently
-          #    supported by Workers."
-          # The MyNewAp1Claude deploys that "worked on trycloudflare for
-          # months" only ever served HTTP tRPC, never WebSockets — so
-          # their success was not evidence that quick tunnels proxy WS.
-          # localtunnel IS proven to work: runs 24029501692, 24030501870,
-          # 24033010832 all shipped working WS chat via *.loca.lt in this
-          # session. Stay on localtunnel until the user provides a
-          # CF_TUNNEL_TOKEN for a Cloudflare Named Tunnel.
-          #
-          # npx avoids the ubuntu-latest EACCES on `npm install -g`.
-          echo "pre-warming localtunnel via npx"
-          npx --yes localtunnel --help > /tmp/lt-warm.log 2>&1 || {
-            echo "::error::localtunnel pre-warm (npx --yes localtunnel --help) failed"
-            cat /tmp/lt-warm.log || true
-            exit 1
-          }
-          echo "localtunnel ready via npx"
+          echo "⏳ Waiting for server to pass health checks..."
+          HEALTH_OK="false"
+          for attempt in $(seq 1 18); do
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "❌ Server exited before startup completed"
+              echo "----- server.log -----"
+              cat server.log || true
+              exit 1
+            fi
 
-          # -------- 9.11  Fetch runner public IP (localtunnel password) --------
-          RUNNER_IP=""
-          for svc in "https://ipv4.icanhazip.com" "https://api.ipify.org" "https://ifconfig.me/ip"; do
-            CAND=$(curl -fsS --max-time 5 "$svc" 2>/dev/null | tr -d '[:space:]' || true)
-            if [ -n "$CAND" ]; then
-              RUNNER_IP="$CAND"
-              echo "runner IP acquired from $svc: $RUNNER_IP"
+            if curl -fsS http://localhost:5000/api/health > health.log 2>&1; then
+              HEALTH_OK="true"
+              echo "✅ Health check passed on attempt $attempt"
+              cat health.log
               break
             fi
-          done
-          if [ -z "$RUNNER_IP" ]; then
-            RUNNER_IP="unknown"
-            echo "::warning::IP lookup failed — read the IP off the localtunnel interstitial page"
-          fi
 
-          # -------- 9.12  Launch localtunnel, poll for URL (60s timeout) --------
-          npx --yes localtunnel --port 5000 --print-requests > tunnel.log 2>&1 &
-          TUNNEL_PID=$!
-          echo "lt pid=$TUNNEL_PID"
-          TUNNEL_URL=""
-          for attempt in $(seq 1 12); do
-            TUNNEL_URL=$(grep -oE 'https://[a-z0-9-]+\.loca\.lt' tunnel.log 2>/dev/null | head -1 || true)
-            if [ -n "$TUNNEL_URL" ]; then
-              echo "tunnel URL acquired on attempt $attempt: $TUNNEL_URL"
-              break
-            fi
+            echo "⌛ Health check attempt $attempt/18 failed; retrying..."
             sleep 5
           done
-          if [ -z "$TUNNEL_URL" ]; then
-            echo "::error::localtunnel did not publish a *.loca.lt URL within 60s"
-            echo "---- tunnel.log (full) ----"
-            cat tunnel.log || true
-            echo "---- end tunnel.log ----"
+
+          if [ "$HEALTH_OK" != "true" ]; then
+            echo "❌ Server did not become healthy on localhost:5000"
+            echo "----- health.log -----"
+            cat health.log || true
+            echo "----- server.log -----"
+            cat server.log || true
             exit 1
           fi
 
-          # -------- 9.12b  LIVE WebSocket handshake check through the tunnel --------
-          # Fails the deploy loudly if the tunnel provider regresses on
-          # WS upgrades. Without this guard, a broken chat only shows up
-          # in the user's browser. WITH this guard, it shows up in the
-          # Actions log with the full response dumped.
-          echo "verifying WebSocket upgrade through tunnel: $TUNNEL_URL/ws"
-          sleep 3
-          WS_RESP=$(curl -sS -i --max-time 10 \
-            -H "Connection: Upgrade" \
-            -H "Upgrade: websocket" \
-            -H "Sec-WebSocket-Version: 13" \
-            -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
-            -H "bypass-tunnel-reminder: true" \
-            "$TUNNEL_URL/ws" 2>&1 | head -20 || true)
-          echo "---- WS handshake response (head 20) ----"
-          echo "$WS_RESP"
-          echo "---- end WS handshake response ----"
-          if ! echo "$WS_RESP" | grep -q "101 Switching Protocols"; then
-            echo "::error::WebSocket handshake through $TUNNEL_URL/ws did not return HTTP 101"
-            echo "::error::Tunnel provider cannot proxy WS upgrades — chat UI would be broken"
-            exit 1
-          fi
-          echo "WebSocket handshake verified: tunnel can proxy HTTP 101"
+          # Start tunnel
+          echo "🌐 Starting Cloudflare tunnel..."
+          ./cloudflared tunnel --url http://localhost:5000 2>&1 | tee tunnel.log &
+          TUNNEL_PID=$!
 
-          # -------- 9.13  Push to gist (warning-only on failure) --------
-          if [ -n "${GIST_TOKEN:-}" ] && [ -n "${GIST_ID:-}" ]; then
-            TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-            PAYLOAD=$(jq -n \
-              --arg url  "$TUNNEL_URL" \
-              --arg pwd  "$RUNNER_IP" \
-              --arg prov "$INPUT_PROVIDER" \
-              --arg mdl  "$RESOLVED_MODEL" \
-              --arg rid  "$GH_RUN_ID" \
-              --arg repo "$GH_REPO" \
-              --arg dur  "$INPUT_DURATION" \
-              --arg ts   "$TS" \
-              '{status: "running", tunnel_url: $url, tunnel_password: $pwd, provider: $prov, model: $mdl, run_id: $rid, repository: $repo, started_at: $ts, duration_minutes: ($dur|tonumber)}')
-            BODY=$(jq -n --arg content "$PAYLOAD" '{files: {"tunnel-status.json": {content: $content}}}')
-            if curl -sS -X PATCH "https://api.github.com/gists/$GIST_ID" \
-              -H "Authorization: Bearer $GIST_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              -d "$BODY" > /dev/null; then
-              echo "gist updated with tunnel URL"
-            else
-              echo "::warning::gist push failed — URL is still in the Actions banner below"
-            fi
-          else
-            echo "::notice::GIST_TOKEN or TUNNEL_GIST_ID not configured — skipping gist push"
-          fi
-
-          # -------- 9.14  Runtime banner --------
-          echo ""
-          echo "=============================================================="
-          echo "  OPENLLM BUILDER DEPLOY — LIVE"
-          echo "=============================================================="
-          echo "  URL       : $TUNNEL_URL"
-          echo "  Password  : $RUNNER_IP   (localtunnel interstitial only)"
-          echo "  Provider  : $INPUT_PROVIDER"
-          echo "  Model     : $RESOLVED_MODEL"
-          echo "  Duration  : $INPUT_DURATION minutes"
-          echo "  Sentinel  : $TUNNEL_URL/api/sentinel?tail=200"
-          echo "  Health    : $TUNNEL_URL/api/health"
-          echo "=============================================================="
-          echo ""
-
-          # -------- 9.15  Watchdog loop (replaces flat sleep) --------
-          # Instead of sleeping blindly for the full duration, poll every
-          # 15 seconds that BOTH the agent and the tunnel are still alive
-          # via `kill -0`. If either dies, dump the tail of both logs and
-          # exit 1 immediately. This ensures the workflow accurately
-          # reflects "serving" state throughout the live window, and the
-          # gist / artifacts capture the cause of any silent death.
-          SLEEP_S=$(( INPUT_DURATION * 60 ))
-          POLL_INTERVAL=15
-          ELAPSED=0
-          echo "watchdog serving for ${SLEEP_S}s (poll every ${POLL_INTERVAL}s)..."
-          while [ "$ELAPSED" -lt "$SLEEP_S" ]; do
-            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-              echo "::error::Agent process (pid=$SERVER_PID) died at elapsed=${ELAPSED}s"
-              echo "---- server.log (tail 80) ----"
-              tail -80 server.log 2>/dev/null || true
-              echo "---- end server.log ----"
-              echo "---- tunnel.log (tail 30) ----"
-              tail -30 tunnel.log 2>/dev/null || true
-              echo "---- end tunnel.log ----"
-              exit 1
-            fi
+          # Wait for tunnel URL and verify the tunnel process is still alive.
+          TUNNEL_URL=""
+          for attempt in $(seq 1 12); do
             if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
-              echo "::error::Tunnel process (pid=$TUNNEL_PID) died at elapsed=${ELAPSED}s"
-              echo "---- tunnel.log (tail 80) ----"
-              tail -80 tunnel.log 2>/dev/null || true
-              echo "---- end tunnel.log ----"
-              echo "---- server.log (tail 30) ----"
-              tail -30 server.log 2>/dev/null || true
-              echo "---- end server.log ----"
+              echo "❌ Cloudflare tunnel exited before publishing a URL"
+              echo "----- tunnel.log -----"
+              cat tunnel.log || true
               exit 1
             fi
-            sleep "$POLL_INTERVAL"
-            ELAPSED=$(( ELAPSED + POLL_INTERVAL ))
+
+            TUNNEL_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1 || true)
+            if [ -n "$TUNNEL_URL" ]; then
+              echo "✅ Tunnel URL published on attempt $attempt"
+              break
+            fi
+
+            echo "⌛ Waiting for tunnel URL ($attempt/12)..."
+            sleep 5
           done
 
-          # -------- 9.16  Cleanup is handled by the trap --------
-          echo "duration elapsed (${SLEEP_S}s) — exiting (cleanup will run)"
+          if [ -z "$TUNNEL_URL" ]; then
+            echo "❌ Tunnel URL was not published"
+            echo "----- tunnel.log -----"
+            cat tunnel.log || true
+            exit 1
+          fi
 
-      # -----------------------------------------------------------------------
-      # Step 10 — Upload artifacts (always)
-      # -----------------------------------------------------------------------
-      # Both logs are uploaded regardless of success/failure so every run can
-      # be post-mortem'd from its artifact.
+          echo ""
+          echo "============================================"
+          echo "🎉 DEPLOYMENT COMPLETE!"
+          echo "============================================"
+          echo ""
+          echo "📦 Version: v${{ steps.version.outputs.VERSION }}"
+          echo "🌐 URL: $TUNNEL_URL"
+          echo "🔎 Health: $TUNNEL_URL/api/health"
+          echo ""
+          echo "⏱️  Running for ${{ github.event.inputs.duration }} minutes"
+          echo "============================================"
+
+          # Save URL
+          echo "$TUNNEL_URL" > app_url.txt
+
+          # Update Gist with tunnel URL
+          echo "📤 Updating Gist with tunnel URL..."
+          GIST_ID="${{ vars.TUNNEL_GIST_ID }}"
+          GIST_TOKEN="${{ secrets.GIST_TOKEN }}"
+
+          if [ -n "$GIST_TOKEN" ] && [ -n "$GIST_ID" ]; then
+            TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            IS_REDEPLOY="${{ steps.version.outputs.REDEPLOY }}"
+            DEPLOY_TYPE="new"
+            if [ "$IS_REDEPLOY" = "true" ]; then
+              DEPLOY_TYPE="redeploy"
+            fi
+            GIST_JSON=$(jq -n \
+              --arg url "$TUNNEL_URL" \
+              --arg ver "${{ steps.version.outputs.VERSION }}" \
+              --arg rid "${{ github.run_id }}" \
+              --arg repo "${{ github.repository }}" \
+              --arg dur "${{ github.event.inputs.duration }}" \
+              --arg ts "$TIMESTAMP" \
+              --arg deployType "$DEPLOY_TYPE" \
+              '{tunnel_url: $url, version: $ver, run_id: $rid, repository: $repo, status: "running", duration_minutes: ($dur|tonumber), started_at: $ts, deploy_type: $deployType}')
+
+            PAYLOAD=$(jq -n --arg content "$GIST_JSON" '{files: {"tunnel-status.json": {content: $content}}}')
+
+            curl -s -X PATCH "https://api.github.com/gists/$GIST_ID" \
+              -H "Authorization: Bearer $GIST_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -d "$PAYLOAD" > /dev/null && echo "✅ Gist updated" || echo "⚠️ Gist update failed"
+          else
+            echo "⚠️ GIST_TOKEN or TUNNEL_GIST_ID not configured, skipping Gist update"
+          fi
+
+          # Keep running
+          DURATION_SECONDS=$(( ${{ github.event.inputs.duration }} * 60 ))
+          sleep $DURATION_SECONDS
+
+          # Cleanup
+          kill $SERVER_PID 2>/dev/null || true
+          kill $TUNNEL_PID 2>/dev/null || true
+          [ -n "$OLLAMA_PID" ] && kill $OLLAMA_PID 2>/dev/null || true
+
       - name: Upload artifacts
-        if: always()
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: builder-deploy-${{ github.run_id }}
+          name: deployment-v${{ steps.version.outputs.VERSION }}
           path: |
+            app_url.txt
             server.log
+            health.log
             tunnel.log
-          if-no-files-found: warn
+            pack-output/pack.json
+            ${{ env.ARCHIVE_NAME }}
           retention-days: 7
 
-      # -----------------------------------------------------------------------
-      # Step 11 — Final gist update → status: ended
-      # -----------------------------------------------------------------------
-      # Runs on every exit path. Marks the gist so phones/dashboards know the
-      # URL is no longer valid. Best-effort: never fails the run.
-      - name: Final gist update
+      - name: Deployment Summary
         if: always()
-        env:
-          GIST_ID: ${{ vars.TUNNEL_GIST_ID }}
-          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
-          INPUT_PROVIDER: ${{ github.event.inputs.provider }}
         run: |
-          set -Eeuo pipefail
-          if [ -z "${GIST_TOKEN:-}" ] || [ -z "${GIST_ID:-}" ]; then
-            echo "::notice::GIST_TOKEN or TUNNEL_GIST_ID not configured — skipping final gist update"
-            exit 0
+          VERSION="${{ steps.version.outputs.VERSION }}"
+
+          echo "## 🚀 OpenLLM Builder Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | v${VERSION} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Archive | ${{ env.ARCHIVE_NAME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Git SHA | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Release | [v${VERSION}](https://github.com/${{ github.repository }}/releases/tag/v${VERSION}) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ github.event.inputs.run_app }}" = "yes" ] && [ -f app_url.txt ]; then
+            TUNNEL_URL=$(cat app_url.txt)
+            echo "### Live Application" >> $GITHUB_STEP_SUMMARY
+            echo "🌐 **URL:** ${TUNNEL_URL}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "App will be available for ${{ github.event.inputs.duration }} minutes." >> $GITHUB_STEP_SUMMARY
           fi
-          TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          PAYLOAD=$(jq -n \
-            --arg prov "$INPUT_PROVIDER" \
-            --arg rid  "${{ github.run_id }}" \
-            --arg repo "${{ github.repository }}" \
-            --arg ts   "$TS" \
-            '{tunnel_url: null, tunnel_password: null, provider: $prov, model: null, run_id: $rid, repository: $repo, status: "ended", ended_at: $ts}')
-          BODY=$(jq -n --arg content "$PAYLOAD" '{files: {"tunnel-status.json": {content: $content}}}')
-          curl -sS -X PATCH "https://api.github.com/gists/$GIST_ID" \
-            -H "Authorization: Bearer $GIST_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -d "$BODY" > /dev/null && echo "gist marked ended" || echo "::warning::gist final update failed"
