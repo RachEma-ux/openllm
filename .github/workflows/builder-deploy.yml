@@ -349,6 +349,18 @@ jobs:
           # Port 5000 is the documented default for the OpenLLM web server
           # (src/web/types.ts: "Range: 5000–5999"). Do not use 3000.
           cd "$GITHUB_WORKSPACE"
+
+          # server.ts resolves PUBLIC_DIR via `resolve(import.meta.dir,
+          # 'public')`. Inside the bundled dist/cli.mjs this becomes
+          # dist/public, which bun run build does NOT create. Without
+          # this copy the UI shows "Web UI not installed yet". Proper
+          # fix belongs in the build step (package.json postbuild) —
+          # tracked separately.
+          echo "Staging web UI assets into dist/public..."
+          rm -rf dist/public
+          cp -r src/web/public dist/public
+          ls -lh dist/public/ | head -20
+
           echo "Launching: bun dist/cli.mjs serve 5000"
           OPENLLM_WEB_PORT=5000 \
             bun dist/cli.mjs serve 5000 > server.log 2>&1 &
