@@ -699,7 +699,7 @@ function permReply(id,allowed,el){
 
 /* ── Providers & Models ── */
 const PROVIDERS = {
-  ollama:       {icon:'🦙',badge:'O',models:[]},
+  ollama:       {icon:'🦙',badge:'O',models:['llama3.2:3b','tinyllama','phi3']},
   openai:       {icon:'',badge:'O',models:['gpt-4o','gpt-4o-mini','gpt-4.1','gpt-4.1-mini','o3-mini']},
   gemini:       {icon:'',badge:'G',models:['gemini-2.0-flash','gemini-2.5-pro','gemini-2.5-flash']},
   anthropic:    {icon:'',badge:'A',models:['claude-sonnet-4-5','claude-opus-4','claude-haiku-3-5']},
@@ -779,14 +779,19 @@ fetch('/api/providers').then(r=>r.json()).then(data=>{
   }
 }).catch(()=>{});
 
-// Auto-detect Ollama models from local instance
+// Auto-detect Ollama models from server
 function fetchOllamaModels(){
-  fetch('/api/ollama-models').then(r=>r.json()).then(models=>{
+  return fetch('/api/ollama-models').then(r=>r.json()).then(models=>{
     if(Array.isArray(models)&&models.length){
       PROVIDERS.ollama.models=models;
-      if(currentProvider==='ollama') selectProvider('ollama');
+      if(currentProvider==='ollama'){
+        selectProvider('ollama');
+        currentModel=models[0];
+        const sel=$('#model-sel');
+        if(sel&&sel.options.length)sel.value=models[0];
+      }
     }
-  }).catch(()=>{});
+  }).catch((e)=>{console.warn('[models] fetch failed:',e)});
 }
 fetchOllamaModels();
 
