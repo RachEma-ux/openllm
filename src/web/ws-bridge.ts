@@ -73,6 +73,17 @@ export class WebSocketBridge {
     this.connections.delete(ws)
     // Clean up any pending permission resolver for this connection
     this.permissionResolvers.delete(ws.data.id)
+    // If the last client just disconnected during an active generation,
+    // abort it. Otherwise `this.generating` stays stuck at true forever
+    // and every future client connection's first message is rejected
+    // with "A generation is already in progress". The generation's own
+    // try/finally cannot rescue us here when the orphaned onMessage()
+    // call is blocked on an upstream (e.g. Ollama) that never responds.
+    if (this.connections.size === 0 && this.generating && this.activeAbort) {
+      this.activeAbort.abort()
+      this.generating = false
+      this.activeAbort = null
+    }
   }
 
   get connectionCount(): number {
