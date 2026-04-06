@@ -591,7 +591,19 @@ let providerStatus={};
 function send(){
   const txt=inputEl.value.trim();
   if(!txt)return;
-  if(!ws||ws.readyState!==1){appendMsg('bot','Error: Not connected to server. Reconnecting...');connectWS();return}
+  if(!ws||ws.readyState!==1){
+    appendMsg('user',txt);
+    const state = !ws ? 'null' : ['CONNECTING','OPEN','CLOSING','CLOSED'][ws.readyState];
+    appendMsg('bot','⚠ Not connected (state: '+state+'). Retrying in 2s...');
+    connectWS();
+    setTimeout(()=>{
+      if(ws&&ws.readyState===1){
+        ws.send(JSON.stringify({type:'message',content:txt,provider:currentProvider,model:currentModel}));
+        appendMsg('bot','✓ Reconnected, sending...');
+      }
+    },2000);
+    return;
+  }
   if(providerStatus[currentProvider]===false){appendMsg('user',txt);appendMsg('bot','Error: No API key for '+currentProvider+'. Use Ollama (local) or set the env var.');inputEl.value='';return}
   appendMsg('user',txt);
   inputEl.value='';inputEl.style.height='auto';
@@ -1118,34 +1130,57 @@ window.addEventListener('beforeinstallprompt', (e) => {
   if (home) home.appendChild(btn);
 });
 
-/* ── Service Worker ── */
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').then((reg) => {
+/* ── Service Worker — self-healing ── */
+async function registerSW(){
+  if(!('serviceWorker' in navigator))return;
+  try{
+    // First: unregister any existing SW and clear caches (self-heal stale installs)
+    const regs = await navigator.serviceWorker.getRegistrations();
+    const SW_VERSION = 'v7';
+    const storedVersion = localStorage.getItem('openllm-sw-version');
+    if(storedVersion !== SW_VERSION){
+      console.log('[pwa] SW version changed — clearing old');
+      for(const r of regs){await r.unregister()}
+      if('caches' in window){
+        const keys = await caches.keys();
+        for(const k of keys){await caches.delete(k)}
+      }
+      localStorage.setItem('openllm-sw-version', SW_VERSION);
+      // Reload once to get a fresh context
+      if(!sessionStorage.getItem('openllm-sw-reloaded')){
+        sessionStorage.setItem('openllm-sw-reloaded','1');
+        location.reload();
+        return;
+      }
+    }
+
+    // Now register fresh SW
+    const reg = await navigator.serviceWorker.register('/sw.js?v='+SW_VERSION);
     console.log('[pwa] Service worker registered');
-    // Check for updates every time the page loads
     reg.update();
-    // Auto-reload when a new SW takes control
+
     let refreshing = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (refreshing) return;
+      if(refreshing)return;
       refreshing = true;
-      window.location.reload();
+      location.reload();
     });
-    // When a new SW is waiting, activate it immediately
+
     reg.addEventListener('updatefound', () => {
       const newSW = reg.installing;
-      if (newSW) {
+      if(newSW){
         newSW.addEventListener('statechange', () => {
-          if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
+          if(newSW.state === 'installed' && navigator.serviceWorker.controller){
             newSW.postMessage({ type: 'SKIP_WAITING' });
           }
         });
       }
     });
-  }).catch((e) => {
+  }catch(e){
     console.warn('[pwa] SW registration failed:', e);
-  });
+  }
 }
+registerSW();
 
 /* ── Multi-Backend Manager ── */
 function getBackends(){

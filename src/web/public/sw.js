@@ -1,12 +1,26 @@
-const CACHE_NAME = 'openllm-v5';
+// OpenLLM Service Worker — minimal, safe, self-healing
+const CACHE_NAME = 'openllm-v7';
 const STATIC_ASSETS = ['/favicon.svg', '/manifest.json', '/icon-192.svg', '/icon-512.svg'];
 
-// Install: cache static assets
+// Install: cache only static assets, activate immediately
 self.addEventListener('install', (e) => {
   e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.addAll(STATIC_ASSETS).catch(() => null)
+    )
   );
   self.skipWaiting();
+});
+
+// Activate: delete ALL old caches + take control immediately
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)));
+      await self.clients.claim();
+    })()
+  );
 });
 
 // Allow UI to force activation
@@ -14,46 +28,32 @@ self.addEventListener('message', (e) => {
   if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
-// Activate: clean old caches
-self.addEventListener('activate', (e) => {
-  e.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
-  );
-  self.clients.claim();
-});
-
-// Fetch: network-first for HTML + API, cache-first for assets
+// Fetch: ONLY cache static asset paths, let EVERYTHING else pass through
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
 
-  // Skip WebSocket and non-GET
+  // Skip all non-GET and cross-origin
   if (e.request.method !== 'GET') return;
-  if (url.pathname.startsWith('/ws')) return;
-
-  // Only handle same-origin requests (skip CDN scripts, etc.)
   if (url.origin !== self.location.origin) return;
 
-  // API and HTML (index): always network-first, fall back to cache only if offline
-  if (url.pathname.startsWith('/api/') || url.pathname === '/' || url.pathname.endsWith('.html')) {
-    e.respondWith(
-      fetch(e.request).catch(() => caches.match(e.request) || caches.match('/'))
-    );
-    return;
-  }
+  // Skip WebSocket, API, and HTML (let network handle)
+  if (url.pathname.startsWith('/ws')) return;
+  if (url.pathname.startsWith('/api/')) return;
+  if (url.pathname === '/' || url.pathname.endsWith('.html')) return;
 
-  // Static assets: cache-first, update in background
+  // Only intercept the known static assets
+  const isStatic = STATIC_ASSETS.some((p) => url.pathname === p);
+  if (!isStatic) return;
+
   e.respondWith(
-    caches.match(e.request).then((cached) => {
-      const fetchPromise = fetch(e.request).then((response) => {
-        if (response.ok) {
-          const clone = response.clone();
+    caches.match(e.request).then((cached) =>
+      cached || fetch(e.request).then((res) => {
+        if (res.ok) {
+          const clone = res.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
         }
-        return response;
-      }).catch(() => cached);
-      return cached || fetchPromise;
-    })
+        return res;
+      }).catch(() => cached || new Response('', { status: 503 }))
+    )
   );
 });
