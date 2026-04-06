@@ -28,6 +28,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: builder-deploy
@@ -351,6 +352,11 @@ jobs:
           # Save URL
           echo "$TUNNEL_URL" > app_url.txt
 
+          # Mark the deploy as successful so the final cleanup step knows
+          # that any subsequent timeout/cancellation is "after a successful
+          # run" and the workflow run can be deleted from history.
+          touch "$RUNNER_TEMP/.deploy-success"
+
           # Update Gist with tunnel URL
           echo "📤 Updating Gist with tunnel URL..."
           GIST_ID="${{ vars.TUNNEL_GIST_ID }}"
@@ -461,3 +467,34 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "App will be available for ${{ github.event.inputs.duration }} minutes." >> $GITHUB_STEP_SUMMARY
           fi
+
+      - name: Delete workflow run after successful deploy
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Only delete the run if the deploy reached the "tunnel is live"
+          # milestone. That way a build/release failure stays visible in
+          # Actions history, but a successful run that later times out or
+          # is cancelled gets removed automatically.
+          if [ ! -f "$RUNNER_TEMP/.deploy-success" ]; then
+            echo "ℹ️ Deploy-success marker not set; keeping workflow run."
+            exit 0
+          fi
+
+          JOB_STATUS="${{ job.status }}"
+          if [ "$JOB_STATUS" != "success" ] && [ "$JOB_STATUS" != "cancelled" ]; then
+            echo "ℹ️ Job status is '$JOB_STATUS'; keeping workflow run."
+            exit 0
+          fi
+
+          echo "🗑️  Deploy succeeded (status=$JOB_STATUS). Deleting workflow run ${{ github.run_id }}..."
+          # Fire-and-forget in the background so the API call has time to
+          # dispatch before the runner is torn down by the deletion.
+          (
+            sleep 5
+            gh api -X DELETE "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+              && echo "✅ Workflow run deleted" \
+              || echo "⚠️ Failed to delete workflow run"
+          ) &
+          disown || true
