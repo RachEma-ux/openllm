@@ -480,44 +480,53 @@ jobs:
           fi
           echo "/api/sentinel returned $(echo "$SENTINEL_BODY" | wc -l) lines — full-agent build confirmed"
 
-          # -------- 9.10  Install cloudflared --------
-          # Cloudflare Tunnel (quick tunnel mode, no account needed) gives a
-          # *.trycloudflare.com URL with zero setup and no password-style
-          # interstitial. This is the same pattern the MyNewAp1Claude repo
-          # has used successfully for months.
+          # -------- 9.10  Pre-warm localtunnel via npx --------
+          # cloudflared quick tunnel (trycloudflare.com) was tested TWICE
+          # in this session — commits 9a6b750-era (natural emergence) and
+          # e0f11ce (explicit re-test with the handshake guard). Both
+          # times the /ws upgrade through *.trycloudflare.com returned:
+          #   HTTP/2 500
+          #   "The server returned HTTP status 101, which is not currently
+          #    supported by Workers."
+          # The MyNewAp1Claude deploys that "worked on trycloudflare for
+          # months" only ever served HTTP tRPC, never WebSockets — so
+          # their success was not evidence that quick tunnels proxy WS.
+          # localtunnel IS proven to work: runs 24029501692, 24030501870,
+          # 24033010832 all shipped working WS chat via *.loca.lt in this
+          # session. Stay on localtunnel until the user provides a
+          # CF_TUNNEL_TOKEN for a Cloudflare Named Tunnel.
           #
-          # Quick-tunnel WebSocket support: a single earlier curl test in a
-          # prior deploy returned an HTTP 500 with "status 101 not supported
-          # by Workers", but that was likely a transient Cloudflare edge
-          # issue — Cloudflare Tunnel has documented WebSocket support, and
-          # we had never actually exercised WS through a quick tunnel before
-          # that test. Step 9.12b below does a LIVE handshake through the
-          # published tunnel URL and fails the deploy loudly if the 101 ever
-          # fails to come back, so any future regression is caught in the
-          # workflow log, not silently broken in the browser.
-          echo "installing cloudflared"
-          curl -fsSL -o cloudflared \
-            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
-            || {
-              echo "::error::cloudflared binary download failed"
-              exit 1
-            }
-          chmod +x cloudflared
-          ./cloudflared --version || true
+          # npx avoids the ubuntu-latest EACCES on `npm install -g`.
+          echo "pre-warming localtunnel via npx"
+          npx --yes localtunnel --help > /tmp/lt-warm.log 2>&1 || {
+            echo "::error::localtunnel pre-warm (npx --yes localtunnel --help) failed"
+            cat /tmp/lt-warm.log || true
+            exit 1
+          }
+          echo "localtunnel ready via npx"
 
-          # -------- 9.11  (intentionally empty) --------
-          # localtunnel required a runner-public-IP "password" for its
-          # interstitial. cloudflared has no interstitial, no password, no
-          # signup. Step number is preserved for comment continuity with
-          # the runtime contract in the file header.
+          # -------- 9.11  Fetch runner public IP (localtunnel password) --------
+          RUNNER_IP=""
+          for svc in "https://ipv4.icanhazip.com" "https://api.ipify.org" "https://ifconfig.me/ip"; do
+            CAND=$(curl -fsS --max-time 5 "$svc" 2>/dev/null | tr -d '[:space:]' || true)
+            if [ -n "$CAND" ]; then
+              RUNNER_IP="$CAND"
+              echo "runner IP acquired from $svc: $RUNNER_IP"
+              break
+            fi
+          done
+          if [ -z "$RUNNER_IP" ]; then
+            RUNNER_IP="unknown"
+            echo "::warning::IP lookup failed — read the IP off the localtunnel interstitial page"
+          fi
 
-          # -------- 9.12  Launch cloudflared quick tunnel, poll for URL --------
-          ./cloudflared tunnel --url http://localhost:5000 > tunnel.log 2>&1 &
+          # -------- 9.12  Launch localtunnel, poll for URL (60s timeout) --------
+          npx --yes localtunnel --port 5000 --print-requests > tunnel.log 2>&1 &
           TUNNEL_PID=$!
-          echo "cloudflared pid=$TUNNEL_PID"
+          echo "lt pid=$TUNNEL_PID"
           TUNNEL_URL=""
           for attempt in $(seq 1 12); do
-            TUNNEL_URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' tunnel.log 2>/dev/null | head -1 || true)
+            TUNNEL_URL=$(grep -oE 'https://[a-z0-9-]+\.loca\.lt' tunnel.log 2>/dev/null | head -1 || true)
             if [ -n "$TUNNEL_URL" ]; then
               echo "tunnel URL acquired on attempt $attempt: $TUNNEL_URL"
               break
@@ -525,7 +534,7 @@ jobs:
             sleep 5
           done
           if [ -z "$TUNNEL_URL" ]; then
-            echo "::error::cloudflared did not publish a *.trycloudflare.com URL within 60s"
+            echo "::error::localtunnel did not publish a *.loca.lt URL within 60s"
             echo "---- tunnel.log (full) ----"
             cat tunnel.log || true
             echo "---- end tunnel.log ----"
@@ -533,50 +542,42 @@ jobs:
           fi
 
           # -------- 9.12b  LIVE WebSocket handshake check through the tunnel --------
-          # The mandatory guard against the "chat is dead even though HTTP
-          # works" failure mode. We curl the /ws path through the PUBLIC
-          # tunnel URL with proper WebSocket upgrade headers and assert
-          # the response is "HTTP/X.X 101 Switching Protocols". If the
-          # tunnel provider (or Cloudflare Workers) cannot proxy the
-          # upgrade, we fail the deploy here — BEFORE publishing the URL
-          # to the gist — so a browser never sees a broken chat page.
-          #
-          # This is the check I should have added the first time instead
-          # of panicking and switching providers based on one bad result.
+          # Fails the deploy loudly if the tunnel provider regresses on
+          # WS upgrades. Without this guard, a broken chat only shows up
+          # in the user's browser. WITH this guard, it shows up in the
+          # Actions log with the full response dumped.
           echo "verifying WebSocket upgrade through tunnel: $TUNNEL_URL/ws"
-          # Give the tunnel a few seconds to fully register before testing
           sleep 3
           WS_RESP=$(curl -sS -i --max-time 10 \
             -H "Connection: Upgrade" \
             -H "Upgrade: websocket" \
             -H "Sec-WebSocket-Version: 13" \
             -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+            -H "bypass-tunnel-reminder: true" \
             "$TUNNEL_URL/ws" 2>&1 | head -20 || true)
           echo "---- WS handshake response (head 20) ----"
           echo "$WS_RESP"
           echo "---- end WS handshake response ----"
           if ! echo "$WS_RESP" | grep -q "101 Switching Protocols"; then
-            echo "::error::WebSocket handshake through $TUNNEL_URL/ws did not return HTTP 101 Switching Protocols"
+            echo "::error::WebSocket handshake through $TUNNEL_URL/ws did not return HTTP 101"
             echo "::error::Tunnel provider cannot proxy WS upgrades — chat UI would be broken"
             exit 1
           fi
           echo "WebSocket handshake verified: tunnel can proxy HTTP 101"
 
           # -------- 9.13  Push to gist (warning-only on failure) --------
-          # tunnel_password kept in the payload schema for phone-side
-          # dashboard backward compat, but always null for cloudflared
-          # (no interstitial, no password).
           if [ -n "${GIST_TOKEN:-}" ] && [ -n "${GIST_ID:-}" ]; then
             TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             PAYLOAD=$(jq -n \
               --arg url  "$TUNNEL_URL" \
+              --arg pwd  "$RUNNER_IP" \
               --arg prov "$INPUT_PROVIDER" \
               --arg mdl  "$RESOLVED_MODEL" \
               --arg rid  "$GH_RUN_ID" \
               --arg repo "$GH_REPO" \
               --arg dur  "$INPUT_DURATION" \
               --arg ts   "$TS" \
-              '{status: "running", tunnel_url: $url, tunnel_password: null, provider: $prov, model: $mdl, run_id: $rid, repository: $repo, started_at: $ts, duration_minutes: ($dur|tonumber)}')
+              '{status: "running", tunnel_url: $url, tunnel_password: $pwd, provider: $prov, model: $mdl, run_id: $rid, repository: $repo, started_at: $ts, duration_minutes: ($dur|tonumber)}')
             BODY=$(jq -n --arg content "$PAYLOAD" '{files: {"tunnel-status.json": {content: $content}}}')
             if curl -sS -X PATCH "https://api.github.com/gists/$GIST_ID" \
               -H "Authorization: Bearer $GIST_TOKEN" \
@@ -596,12 +597,12 @@ jobs:
           echo "  OPENLLM BUILDER DEPLOY — LIVE"
           echo "=============================================================="
           echo "  URL       : $TUNNEL_URL"
+          echo "  Password  : $RUNNER_IP   (localtunnel interstitial only)"
           echo "  Provider  : $INPUT_PROVIDER"
           echo "  Model     : $RESOLVED_MODEL"
           echo "  Duration  : $INPUT_DURATION minutes"
           echo "  Sentinel  : $TUNNEL_URL/api/sentinel?tail=200"
           echo "  Health    : $TUNNEL_URL/api/health"
-          echo "  WS test   : wss://${TUNNEL_URL#https://}/ws (verified at 9.12b)"
           echo "=============================================================="
           echo ""
 
