@@ -343,10 +343,13 @@ jobs:
           fi
 
           # ── Start the FULL agent (Bun + QueryEngine + tools) ──
+          # MUST use bun (not node): src/web/server.ts uses Bun-native APIs
+          # (import.meta.dir, Bun.file, Bun.serve). Running the bundle under
+          # node crashes immediately with "paths[0] must be of type string".
           cd "$GITHUB_WORKSPACE"
-          echo "Launching: node dist/cli.mjs serve 3000"
+          echo "Launching: bun dist/cli.mjs serve 3000"
           OPENLLM_WEB_PORT=3000 \
-            node dist/cli.mjs serve 3000 > server.log 2>&1 &
+            bun dist/cli.mjs serve 3000 > server.log 2>&1 &
           SERVER_PID=$!
 
           # ── Wait for health (QueryEngine takes longer to init) ──
