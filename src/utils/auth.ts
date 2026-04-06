@@ -281,6 +281,15 @@ export function getAnthropicApiKeyWithSource(
       !process.env.CLAUDE_CODE_OAUTH_TOKEN &&
       !process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR
     ) {
+      // SENTINEL: auth.decision — record exactly why we're about to throw
+      console.error(
+        `${new Date().toISOString()} [sentinel] auth.decision outcome=throw_missing_key ` +
+        `is_3p=${isUsing3PServices()} ` +
+        `has_api_key=${!!apiKeyEnv} ` +
+        `has_oauth_token=${!!process.env.CLAUDE_CODE_OAUTH_TOKEN} ` +
+        `has_oauth_fd=${!!process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR} ` +
+        `ci=${process.env.CI ?? 'unset'}`,
+      )
       throw new Error(
         'ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN env var is required',
       )

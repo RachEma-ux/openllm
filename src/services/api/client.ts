@@ -104,6 +104,23 @@ export async function getAnthropicClient({
   source?: string
   providerOverride?: { model: string; baseURL: string; apiKey: string }
 }): Promise<Anthropic> {
+  // SENTINEL: provider.route — snapshot of every input that influences
+  // which transport (Anthropic / OpenAI shim / Bedrock / Vertex / Foundry)
+  // this client creation will pick
+  console.error(
+    `${new Date().toISOString()} [sentinel] provider.route ` +
+    `requested_model=${model ?? 'unset'} ` +
+    `source=${source ?? 'unset'} ` +
+    `override=${providerOverride ? providerOverride.baseURL : 'none'} ` +
+    `use_openai=${process.env.CLAUDE_CODE_USE_OPENAI ?? '0'} ` +
+    `use_github=${process.env.CLAUDE_CODE_USE_GITHUB ?? '0'} ` +
+    `use_gemini=${process.env.CLAUDE_CODE_USE_GEMINI ?? '0'} ` +
+    `use_bedrock=${process.env.CLAUDE_CODE_USE_BEDROCK ?? '0'} ` +
+    `use_vertex=${process.env.CLAUDE_CODE_USE_VERTEX ?? '0'} ` +
+    `use_foundry=${process.env.CLAUDE_CODE_USE_FOUNDRY ?? '0'} ` +
+    `openai_base_url=${process.env.OPENAI_BASE_URL ?? 'unset'}`,
+  )
+
   const containerId = process.env.CLAUDE_CODE_CONTAINER_ID
   const remoteSessionId = process.env.CLAUDE_CODE_REMOTE_SESSION_ID
   const clientApp = process.env.CLAUDE_AGENT_SDK_CLIENT_APP

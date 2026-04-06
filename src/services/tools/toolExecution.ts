@@ -341,6 +341,16 @@ export async function* runToolUse(
   toolUseContext: ToolUseContext,
 ): AsyncGenerator<MessageUpdateLazy, void> {
   const toolName = toolUse.name
+  // SENTINEL: tool.start — every tool invocation; truncate input to avoid
+  // logging huge payloads or sensitive content
+  {
+    const inputPreview = JSON.stringify(toolUse.input ?? {}).slice(0, 180)
+    console.error(
+      `${new Date().toISOString()} [sentinel] tool.start ` +
+      `name=${toolName} tool_use_id=${toolUse.id} ` +
+      `input_preview=${inputPreview}`,
+    )
+  }
   // First try to find in the available tools (what the model sees)
   let tool = findToolByName(toolUseContext.options.tools, toolName)
 

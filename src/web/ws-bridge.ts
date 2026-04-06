@@ -86,6 +86,13 @@ export class WebSocketBridge {
   /** Send a message to every connected client. */
   broadcast(msg: ServerMessage): void {
     const payload = JSON.stringify(msg)
+    // SENTINEL: ws.msg_out — outbound server frame; skip noisy per-token events
+    if (msg.type !== 'token') {
+      console.error(
+        `${new Date().toISOString()} [sentinel] ws.msg_out type=${msg.type} ` +
+        `payload_len=${payload.length} recipients=${this.connections.size}`,
+      )
+    }
     for (const ws of this.connections) {
       try {
         ws.send(payload)
@@ -116,13 +123,20 @@ export class WebSocketBridge {
     ws: { send(data: string): void; data: WSData },
     raw: string,
   ): Promise<void> {
+    // SENTINEL: ws.msg_in — every inbound client frame, with type + size
     let parsed: ClientMessage
     try {
       parsed = JSON.parse(raw) as ClientMessage
     } catch {
+      console.error(
+        `${new Date().toISOString()} [sentinel] ws.msg_in id=${ws.data.id} type=invalid_json raw_len=${raw.length}`,
+      )
       this.sendTo(ws, { type: 'error', message: 'Invalid JSON' })
       return
     }
+    console.error(
+      `${new Date().toISOString()} [sentinel] ws.msg_in id=${ws.data.id} type=${parsed.type} raw_len=${raw.length}`,
+    )
 
     switch (parsed.type) {
       case 'message':
@@ -154,6 +168,10 @@ export class WebSocketBridge {
     content: string,
   ): Promise<void> {
     if (this.generating) {
+      // SENTINEL: ws.reject — message dropped because a generation is running
+      console.error(
+        `${new Date().toISOString()} [sentinel] ws.reject id=${ws.data.id} reason=generation_in_progress content_len=${content.length}`,
+      )
       this.sendTo(ws, {
         type: 'error',
         message: 'A generation is already in progress. Send "cancel" first.',

@@ -369,6 +369,21 @@ jobs:
           # (src/web/types.ts: "Range: 5000–5999"). Do not use 3000.
           cd "$GITHUB_WORKSPACE"
 
+          # ── SENTINEL v1 — live app-log streaming ──
+          # Every byte the OpenLLM process writes (including all
+          # [sentinel] events injected into server.ts, ws-bridge.ts,
+          # client.ts, toolExecution.ts, and auth.ts) ends up in
+          # server.log via the stdout redirect a few lines below.
+          # Sentinel pre-creates the file and tails it to this step's
+          # stdout with an SENTINEL prefix so every event appears live
+          # in the GitHub Actions workflow log AND is persisted as an
+          # artifact after the run (via the existing Upload artifacts
+          # step which already includes server.log).
+          : > server.log
+          ( tail -F server.log 2>/dev/null ) &
+          SENTINEL_PID=$!
+          echo "SENTINEL: live log tail started (pid=$SENTINEL_PID)"
+
           # server.ts resolves PUBLIC_DIR via `resolve(import.meta.dir,
           # 'public')`. Inside the bundled dist/cli.mjs this becomes
           # dist/public, which bun run build does NOT create. Without
@@ -546,6 +561,7 @@ jobs:
           # ── Cleanup ──
           kill $SERVER_PID 2>/dev/null || true
           kill $TUNNEL_PID 2>/dev/null || true
+          kill $SENTINEL_PID 2>/dev/null || true
 
       # ========== ARTIFACTS ==========
       - name: Upload artifacts

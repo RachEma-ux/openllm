@@ -157,6 +157,16 @@ export async function startWebServer(
       ? parseInt(process.env.OPENLLM_WEB_PORT, 10)
       : 5000)
 
+  // SENTINEL: boot.start — snapshot of the provider-routing env at startup
+  console.error(
+    `${new Date().toISOString()} [sentinel] boot.start port=${port} ` +
+    `openllm_provider=${process.env.OPENLLM_PROVIDER ?? 'unset'} ` +
+    `openllm_model=${process.env.OPENLLM_MODEL ?? 'unset'} ` +
+    `claude_code_use_openai=${process.env.CLAUDE_CODE_USE_OPENAI ?? 'unset'} ` +
+    `openai_base_url=${process.env.OPENAI_BASE_URL ?? 'unset'} ` +
+    `ci=${process.env.CI ?? 'unset'}`,
+  )
+
   const bridge = new WebSocketBridge(options.onMessage)
   options.onBridgeReady?.(bridge)
 
@@ -176,10 +186,22 @@ export async function startWebServer(
           id: generateConnectionId(),
           connectedAt: Date.now(),
         }
+        // SENTINEL: ws.upgrade_attempt — log every WS upgrade request with
+        // enough context to distinguish browser clients from probe tools
+        console.error(
+          `${new Date().toISOString()} [sentinel] ws.upgrade_attempt ` +
+          `id=${wsData.id} ` +
+          `origin=${req.headers.get('origin') ?? 'none'} ` +
+          `ua="${(req.headers.get('user-agent') ?? 'none').slice(0, 120)}" ` +
+          `xfwd=${req.headers.get('x-forwarded-for') ?? 'none'}`,
+        )
         const upgraded = server.upgrade(req, { data: wsData })
         if (upgraded) {
           return undefined as unknown as Response
         }
+        console.error(
+          `${new Date().toISOString()} [sentinel] ws.upgrade_failed id=${wsData.id}`,
+        )
         return new Response('WebSocket upgrade failed', { status: 400 })
       }
 
@@ -246,8 +268,10 @@ export async function startWebServer(
     websocket: {
       open(ws) {
         bridge.addConnection(ws)
-        console.log(
-          `[openllm-web] WebSocket connected: ${ws.data.id} (${bridge.connectionCount} total)`,
+        // SENTINEL: ws.open — the upgrade handshake completed, ws is OPEN
+        console.error(
+          `${new Date().toISOString()} [sentinel] ws.open ` +
+          `id=${ws.data.id} total=${bridge.connectionCount}`,
         )
       },
 
@@ -257,9 +281,13 @@ export async function startWebServer(
       },
 
       close(ws, code, reason) {
+        const duration_ms = Date.now() - ws.data.connectedAt
         bridge.removeConnection(ws)
-        console.log(
-          `[openllm-web] WebSocket closed: ${ws.data.id} (code=${code}) (${bridge.connectionCount} remaining)`,
+        // SENTINEL: ws.close — connection ended, include close code + duration
+        console.error(
+          `${new Date().toISOString()} [sentinel] ws.close ` +
+          `id=${ws.data.id} code=${code} reason="${(reason ?? '').slice(0, 80)}" ` +
+          `duration_ms=${duration_ms} remaining=${bridge.connectionCount}`,
         )
       },
     },
@@ -273,6 +301,13 @@ export async function startWebServer(
   )
   console.log(
     `[openllm-web] Provider: ${getProviderInfo().name} | Model: ${getProviderInfo().model}`,
+  )
+  // SENTINEL: boot.ready — server is accepting HTTP + WS connections
+  console.error(
+    `${new Date().toISOString()} [sentinel] boot.ready ` +
+    `port=${server.port} ` +
+    `provider=${getProviderInfo().name} ` +
+    `model=${getProviderInfo().model}`,
   )
 
   // -------------------------------------------------------------------
