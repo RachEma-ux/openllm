@@ -299,74 +299,50 @@ jobs:
               sleep 2
             done
 
-            echo "🦙 Warm-up #1: native /api/generate (loads model into memory)..."
+            # Light warm-up: load model into memory with keep_alive=30m
+            # so the first real chat message streams tokens immediately
+            # instead of waiting for mmap + CPU warm. node-server.ts is a
+            # no-tools chat relay so we don't need a tool-bearing probe.
+            echo "🦙 Warming up llama3.2:1b (keep_alive=30m)..."
             WARMUP_START=$(date +%s)
-            if curl -fsS --max-time 120 http://localhost:11434/api/generate \
-                -H 'Content-Type: application/json' \
-                -d '{"model":"llama3.2:1b","prompt":"hi","stream":false,"keep_alive":"30m"}' \
-                > /tmp/ollama-warmup-native.log 2>&1; then
-              WARMUP_END=$(date +%s)
-              echo "🦙 Native warm-up complete in $(( WARMUP_END - WARMUP_START ))s"
-              head -c 500 /tmp/ollama-warmup-native.log
-              echo ""
-            else
-              echo "❌ Ollama native warm-up (/api/generate) failed or timed out"
-              tail -20 /tmp/ollama-warmup-native.log 2>/dev/null || true
-              exit 1
-            fi
-
-            # Warm-up #2 — hit the EXACT endpoint the agent will use
-            # (OpenAI-compatible /v1/chat/completions) WITH a tool
-            # definition in the payload. This is critical: the OpenLLM
-            # agent sends ~19 tool schemas on every request, and some
-            # models (e.g. tinyllama, gemma2:2b) return HTTP 400
-            # "does not support tools" when the tools field is present.
-            # A warm-up without tools would pass for those models and
-            # then fail in the browser. This probe catches it here.
-            echo "🦙 Warm-up #2: OpenAI-compat /v1/chat/completions WITH tools (agent's real path)..."
-            WARMUP2_START=$(date +%s)
-            if curl -fsS --max-time 120 http://localhost:11434/v1/chat/completions \
-                -H 'Content-Type: application/json' \
-                -H 'Authorization: Bearer dummy' \
-                -d '{"model":"llama3.2:1b","messages":[{"role":"user","content":"hi"}],"stream":false,"tools":[{"type":"function","function":{"name":"probe","description":"probe","parameters":{"type":"object","properties":{}}}}]}' \
-                > /tmp/ollama-warmup-compat.log 2>&1; then
-              WARMUP2_END=$(date +%s)
-              echo "🦙 OpenAI-compat+tools warm-up complete in $(( WARMUP2_END - WARMUP2_START ))s"
-              head -c 500 /tmp/ollama-warmup-compat.log
-              echo ""
-              # Extra guard: sniff the response for Ollama's "does not
-              # support tools" error, which returns HTTP 200 in the
-              # streaming path but an error body in the non-streaming path.
-              if grep -q "does not support tools" /tmp/ollama-warmup-compat.log; then
-                echo "❌ Model does not support tools — the agent would fail on every chat"
-                cat /tmp/ollama-warmup-compat.log
-                exit 1
-              fi
-            else
-              echo "❌ Ollama OpenAI-compat+tools warm-up failed or timed out"
-              echo "   This is the exact endpoint the agent uses — chat would hang in browser"
-              tail -30 /tmp/ollama-warmup-compat.log 2>/dev/null || true
-              exit 1
-            fi
+            curl -fsS --max-time 120 http://localhost:11434/api/generate \
+              -H 'Content-Type: application/json' \
+              -d '{"model":"llama3.2:1b","prompt":"hi","stream":false,"keep_alive":"30m"}' \
+              > /tmp/ollama-warmup.log 2>&1 \
+              && echo "🦙 Warm-up complete in $(( $(date +%s) - WARMUP_START ))s" \
+              || echo "⚠️ Ollama warm-up failed (non-fatal — first message will be slow)"
           else
             echo "⚠️ Ollama not available — skipping local LLM"
           fi
 
-          # Provider routing — Claude Code OpenAI-compatible transport.
-          # CLAUDE_CODE_USE_OPENAI=1 is REQUIRED; without it the agent
-          # throws "ANTHROPIC_API_KEY required" on the first chat message
-          # because CI=true enters the Anthropic-auth branch.
-          export CLAUDE_CODE_USE_OPENAI=1
-          export OPENAI_BASE_URL="http://localhost:11434/v1"
-          export OPENAI_API_KEY="dummy-ollama-no-auth"
-          export OPENAI_MODEL="llama3.2:1b"
-          export OPENLLM_PROVIDER="ollama"
-          export OPENLLM_MODEL="llama3.2:1b"
+          # Launch the CHAT RELAY (src/web/node-server.ts), not the full
+          # tool-calling agent (dist/cli.mjs serve).
+          #
+          # WHY the relay and not the full agent:
+          #   - The full agent sends ~19 tool schemas to every chat
+          #     completion request. Small Ollama models (tinyllama,
+          #     llama3.2:1b, llama3.2:3b) can't reason about that many
+          #     tools on a CPU-only GitHub runner within any reasonable
+          #     WebSocket timeout — every chat hangs.
+          #   - node-server.ts is a plain chat relay with NO tool
+          #     definitions. It simply forwards user messages to
+          #     Ollama's /chat/completions and streams tokens back.
+          #   - This is the configuration that was actually serving
+          #     chat in the "Ground Zero V2" verified-working state —
+          #     the original workflow had a fallback to node-server.ts
+          #     when the full agent failed, and in practice the
+          #     fallback was always the thing serving users.
+          #
+          # Environment: node-server.ts has its own provider config
+          # (hardcoded http://localhost:11434/v1 for ollama) and does
+          # NOT need CLAUDE_CODE_USE_OPENAI / OPENAI_BASE_URL /
+          # OPENAI_API_KEY / OPENAI_MODEL. The relay also serves its
+          # own static UI from src/web/public directly, so no
+          # dist/public staging is needed for this launch path.
+          export OPENLLM_WEB_PORT=5000
 
-          # Launch the full agent. MUST be `bun`, not `node` — src/web/server.ts
-          # uses Bun-native APIs (import.meta.dir, Bun.file, Bun.serve).
-          echo "Launching: bun dist/cli.mjs serve 5000"
-          bun dist/cli.mjs serve 5000 > server.log 2>&1 &
+          echo "Launching: bun src/web/node-server.ts (chat relay, port 5000)"
+          bun src/web/node-server.ts > server.log 2>&1 &
           SERVER_PID=$!
 
           echo "⏳ Waiting for server to pass health checks..."
