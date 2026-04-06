@@ -241,7 +241,10 @@ jobs:
           echo "Pulling $RESOLVED_MODEL"
           ollama pull "$RESOLVED_MODEL"
           echo "Verifying $RESOLVED_MODEL is in ollama list"
-          if ! ollama list | grep -q "$(echo "$RESOLVED_MODEL" | cut -d: -f1)"; then
+          # grep -F = fixed-string match (not regex). Needed because model
+          # names like `llama3.2` contain `.` which is a regex metacharacter.
+          MODEL_BASE=$(echo "$RESOLVED_MODEL" | cut -d: -f1)
+          if ! ollama list | grep -qF "$MODEL_BASE"; then
             echo "::error::Ollama model $RESOLVED_MODEL not found in 'ollama list' after pull"
             ollama list || true
             cat /tmp/ollama.log || true
@@ -324,6 +327,21 @@ jobs:
           # -------- 9.3  cd to the repo root --------
           cd "$GITHUB_WORKSPACE"
 
+          # -------- 9.3b  Ollama backend liveness check (ollama branch only) --------
+          # GUARD for the "agent-label lies about a dead backend" failure mode:
+          # /api/health reports provider=ollama based on OPENLLM_PROVIDER alone,
+          # so a healthy-looking agent can silently point at a dead Ollama
+          # daemon. Verify the daemon itself is answering BEFORE we launch
+          # the agent. Catches the rare but real case where `ollama serve`
+          # from step 8 didn't survive the inter-step transition.
+          if [ "$INPUT_PROVIDER" = "ollama" ]; then
+            if ! curl -fsS --max-time 5 http://localhost:11434/api/tags > /dev/null 2>&1; then
+              echo "::error::Ollama daemon at http://localhost:11434 is unreachable at launch time (ollama branch)"
+              exit 1
+            fi
+            echo "ollama daemon reachable at localhost:11434"
+          fi
+
           # -------- 9.4  Pre-create server.log (so tail -F doesn't race) --------
           : > server.log
           : > tunnel.log
@@ -338,19 +356,35 @@ jobs:
             set +e
             echo ""
             echo "== cleanup =="
+            # Send SIGTERM first, wait a short grace period, then SIGKILL.
+            # Never `wait` — some Node processes ignore SIGTERM and `wait`
+            # would block until the step timeout, defeating cleanup entirely.
+            # Kill order per spec: tunnel -> agent -> sentinel tail.
             if [ -n "$TUNNEL_PID" ]; then
-              echo "killing tunnel pid=$TUNNEL_PID"
-              kill "$TUNNEL_PID" 2>/dev/null || true
-              wait "$TUNNEL_PID" 2>/dev/null || true
+              echo "killing tunnel pid=$TUNNEL_PID (TERM)"
+              kill -TERM "$TUNNEL_PID" 2>/dev/null || true
             fi
             if [ -n "$SERVER_PID" ]; then
-              echo "killing agent pid=$SERVER_PID"
-              kill "$SERVER_PID" 2>/dev/null || true
-              wait "$SERVER_PID" 2>/dev/null || true
+              echo "killing agent pid=$SERVER_PID (TERM)"
+              kill -TERM "$SERVER_PID" 2>/dev/null || true
             fi
             if [ -n "$SENTINEL_PID" ]; then
-              echo "killing sentinel tail pid=$SENTINEL_PID"
-              kill "$SENTINEL_PID" 2>/dev/null || true
+              echo "killing sentinel tail pid=$SENTINEL_PID (TERM)"
+              kill -TERM "$SENTINEL_PID" 2>/dev/null || true
+            fi
+            sleep 2
+            # Escalate to SIGKILL for any survivor. Same order.
+            if [ -n "$TUNNEL_PID" ] && kill -0 "$TUNNEL_PID" 2>/dev/null; then
+              echo "escalating tunnel pid=$TUNNEL_PID (KILL)"
+              kill -9 "$TUNNEL_PID" 2>/dev/null || true
+            fi
+            if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "escalating agent pid=$SERVER_PID (KILL)"
+              kill -9 "$SERVER_PID" 2>/dev/null || true
+            fi
+            if [ -n "$SENTINEL_PID" ] && kill -0 "$SENTINEL_PID" 2>/dev/null; then
+              echo "escalating sentinel tail pid=$SENTINEL_PID (KILL)"
+              kill -9 "$SENTINEL_PID" 2>/dev/null || true
             fi
           }
           trap cleanup EXIT INT TERM
@@ -368,8 +402,12 @@ jobs:
           # -------- 9.6  Launch the full agent --------
           # MUST be `bun`, NOT `node` — src/web/server.ts is Bun-native.
           # Port 5000 is the documented default (src/web/types.ts range 5000-5999).
+          # Redirect is `>>` (append) not `>` — we already pre-created an
+          # empty server.log at 9.4, and the tail -F is already following
+          # it. Truncating again with `>` would create a brief race where
+          # tail could miss boot lines during the inode swap.
           echo "launching: bun dist/cli.mjs serve 5000"
-          bun dist/cli.mjs serve 5000 > server.log 2>&1 &
+          bun dist/cli.mjs serve 5000 >> server.log 2>&1 &
           SERVER_PID=$!
           echo "agent pid=$SERVER_PID"
 
@@ -437,7 +475,24 @@ jobs:
           lt --version || true
 
           # -------- 9.11  Fetch runner public IP (localtunnel password) --------
-          RUNNER_IP=$(curl -fsS --max-time 5 https://ipv4.icanhazip.com 2>/dev/null | tr -d '[:space:]' || echo "unknown")
+          # Try multiple IP-reflection services so a single outage doesn't
+          # hide the password. The banner and gist still surface "unknown"
+          # if every fallback fails — the user can then read the IP from
+          # the localtunnel interstitial page itself.
+          RUNNER_IP=""
+          for svc in "https://ipv4.icanhazip.com" "https://api.ipify.org" "https://ifconfig.me/ip"; do
+            CAND=$(curl -fsS --max-time 5 "$svc" 2>/dev/null | tr -d '[:space:]' || true)
+            if [ -n "$CAND" ]; then
+              RUNNER_IP="$CAND"
+              echo "runner IP acquired from $svc: $RUNNER_IP"
+              break
+            fi
+            echo "runner IP lookup via $svc failed, trying next..."
+          done
+          if [ -z "$RUNNER_IP" ]; then
+            RUNNER_IP="unknown"
+            echo "::warning::Every IP lookup service failed — tunnel password will show as 'unknown'. Read the IP from the localtunnel interstitial page."
+          fi
           echo "runner_ip=$RUNNER_IP (localtunnel interstitial password)"
 
           # -------- 9.12  Launch localtunnel, poll for URL (60s timeout) --------
@@ -502,13 +557,44 @@ jobs:
           echo "=============================================================="
           echo ""
 
-          # -------- 9.15  Sleep for the chosen duration --------
+          # -------- 9.15  Watchdog loop (replaces flat sleep) --------
+          # Instead of sleeping blindly for the full duration, poll every
+          # 15 seconds that BOTH the agent and the tunnel are still alive
+          # via `kill -0`. If either dies, dump the tail of both logs and
+          # exit 1 immediately. This ensures the workflow accurately
+          # reflects "serving" state throughout the live window, and the
+          # gist / artifacts capture the cause of any silent death.
           SLEEP_S=$(( INPUT_DURATION * 60 ))
-          echo "serving for ${SLEEP_S}s..."
-          sleep "$SLEEP_S"
+          POLL_INTERVAL=15
+          ELAPSED=0
+          echo "watchdog serving for ${SLEEP_S}s (poll every ${POLL_INTERVAL}s)..."
+          while [ "$ELAPSED" -lt "$SLEEP_S" ]; do
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "::error::Agent process (pid=$SERVER_PID) died at elapsed=${ELAPSED}s"
+              echo "---- server.log (tail 80) ----"
+              tail -80 server.log 2>/dev/null || true
+              echo "---- end server.log ----"
+              echo "---- tunnel.log (tail 30) ----"
+              tail -30 tunnel.log 2>/dev/null || true
+              echo "---- end tunnel.log ----"
+              exit 1
+            fi
+            if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+              echo "::error::Tunnel process (pid=$TUNNEL_PID) died at elapsed=${ELAPSED}s"
+              echo "---- tunnel.log (tail 80) ----"
+              tail -80 tunnel.log 2>/dev/null || true
+              echo "---- end tunnel.log ----"
+              echo "---- server.log (tail 30) ----"
+              tail -30 server.log 2>/dev/null || true
+              echo "---- end server.log ----"
+              exit 1
+            fi
+            sleep "$POLL_INTERVAL"
+            ELAPSED=$(( ELAPSED + POLL_INTERVAL ))
+          done
 
           # -------- 9.16  Cleanup is handled by the trap --------
-          echo "duration elapsed — exiting (cleanup will run)"
+          echo "duration elapsed (${SLEEP_S}s) — exiting (cleanup will run)"
 
       # -----------------------------------------------------------------------
       # Step 10 — Upload artifacts (always)
