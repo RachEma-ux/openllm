@@ -36,7 +36,7 @@ concurrency:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Reset Gist status to pending
@@ -334,7 +334,7 @@ jobs:
 
           echo "⏳ Waiting for server to pass health checks..."
           HEALTH_OK="false"
-          for attempt in $(seq 1 18); do
+          for attempt in $(seq 1 36); do
             if ! kill -0 "$SERVER_PID" 2>/dev/null; then
               echo "❌ Server exited before startup completed"
               echo "----- server.log -----"
@@ -349,7 +349,7 @@ jobs:
               break
             fi
 
-            echo "⌛ Health check attempt $attempt/18 failed; retrying..."
+            echo "⌛ Health check attempt $attempt/36 failed; retrying..."
             sleep 5
           done
 
