@@ -229,13 +229,13 @@ jobs:
             "checksums.sha256"
 
       # ========== RUN PHASE (Optional) ==========
-      # NOTE: there is no pre-flight API-key check. The chat relay
-      # (src/web/node-server.ts) accepts a per-request `apiKey` field
-      # in the WebSocket payload — the user pastes their key into
-      # Settings → Provider API Keys in the web UI and it's stored in
-      # the browser's localStorage and sent with every chat message.
-      # Any repo secrets (OPENAI_API_KEY, DASHSCOPE_API_KEY, etc.)
-      # still work as a fallback if the client sends no key.
+      # Provider/model defaults live in src/web/providers.ts (the single
+      # source of truth). The chat relay (src/web/node-server.ts) reads
+      # the manifest at boot, exposes it via /api/manifest, and the web
+      # UI fetches it on first load. Per-provider API keys come from the
+      # env block below; the user can also override per-request by
+      # pasting a key into Settings → Provider API Keys (stored in
+      # browser localStorage and sent with every chat message).
 
       - name: Install cloudflared
         if: ${{ github.event.inputs.run_app == 'yes' }}
@@ -246,29 +246,23 @@ jobs:
       - name: Start application with tunnel
         if: ${{ github.event.inputs.run_app == 'yes' }}
         env:
+          # Default provider key — required for the out-of-the-box
+          # openai / gpt-5.4-mini path. The actual repo secret is
+          # MY_PAT (a personal access token that doubles as the OpenAI
+          # key on this repo). The other entries below are optional
+          # fallbacks for users that select a different provider in
+          # the UI without pasting their own key.
           OPENAI_API_KEY: ${{ secrets.MY_PAT }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          # providers.ts reads GEMINI_API_KEY; the existing repo secret
+          # is named GOOGLE_API_KEY, so map it through here.
+          GEMINI_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
           set -euo pipefail
 
-          echo "🚀 Starting application (provider: openai / gpt-5.4-mini)..."
-          OLLAMA_PID=""
-
-          # Launch the CHAT RELAY (src/web/node-server.ts). It has its
-          # own provider registry and routes chat messages to OpenAI
-          # when the client sends provider=openai. The default
-          # client-side provider/model is overridden here via env vars
-          # so the first user message routes to OpenAI without any
-          # manual selection.
-          #
-          # OPENAI_API_KEY is sourced from the MY_PAT repository secret
-          # (see the env: block above). node-server.ts reads it via the
-          # "openai" entry in its PROVIDER_REGISTRY.
+          echo "🚀 Starting application (defaults from src/web/providers.ts: openai / gpt-5.4-mini)..."
           export OPENLLM_WEB_PORT=5000
-          export OPENLLM_PROVIDER="openai"
-          export OPENLLM_MODEL="gpt-5.4-mini"
 
           echo "Launching: bun src/web/node-server.ts (chat relay, port 5000)"
           bun src/web/node-server.ts > server.log 2>&1 &
@@ -395,9 +389,6 @@ jobs:
           # Cleanup
           kill $SERVER_PID 2>/dev/null || true
           kill $TUNNEL_PID 2>/dev/null || true
-          if [ -n "$OLLAMA_PID" ]; then
-            kill $OLLAMA_PID 2>/dev/null || true
-          fi
 
       - name: Reset Gist status on exit
         if: always()

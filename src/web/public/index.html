@@ -380,23 +380,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <div class="tool-item" style="position:relative">
             <span class="model-badge" id="provider-icon">O</span>
             <select id="provider-sel" onchange="selectProvider(this.value)" style="background:none;border:none;color:var(--dim);font-size:13px;font-family:inherit;outline:none;cursor:pointer;appearance:none;-webkit-appearance:none;padding-right:14px">
-              <option value="ollama" selected>Ollama</option>
-              <option value="openai">OpenAI</option>
-              <option value="gemini">Gemini</option>
-              <option value="anthropic">Anthropic</option>
-              <option value="codex">Codex (ChatGPT)</option>
-              <option value="github">GitHub Models</option>
-              <option value="deepseek">DeepSeek</option>
-              <option value="groq">Groq</option>
-              <option value="together">Together</option>
-              <option value="fireworks">Fireworks</option>
-              <option value="mistral">Mistral</option>
-              <option value="lmstudio">LM Studio</option>
-              <option value="openrouter">OpenRouter</option>
-              <option value="bedrock">AWS Bedrock</option>
-              <option value="vertex">Google Vertex</option>
-              <option value="atomic-chat">Atomic Chat</option>
-              <option value="alibaba">Alibaba (Qwen)</option>
+              <!-- Populated from /api/manifest at boot. See providers.ts for the source of truth. -->
             </select>
             <span style="font-size:10px;opacity:.6;pointer-events:none;position:absolute;right:0;top:50%;transform:translateY(-50%)">&#9662;</span>
           </div>
@@ -459,16 +443,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
         <div class="setting-row" style="flex-direction:column;align-items:stretch">
           <span class="setting-label">Provider</span>
           <select class="setting-input" id="apikey-provider-sel" onchange="loadApiKeyForProvider()" style="margin-top:6px">
-            <option value="alibaba">Alibaba (Qwen) — DashScope</option>
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="deepseek">DeepSeek</option>
-            <option value="groq">Groq</option>
-            <option value="mistral">Mistral</option>
-            <option value="openrouter">OpenRouter</option>
-            <option value="together">Together</option>
-            <option value="fireworks">Fireworks</option>
+            <!-- Populated from /api/manifest at boot. -->
           </select>
         </div>
         <div class="setting-row" style="flex-direction:column;align-items:stretch">
@@ -859,50 +834,84 @@ function permReply(id,allowed,el){
   el.innerHTML=`<div style="font-size:12px;font-weight:600;color:${allowed?'var(--green)':'var(--red)'}">${allowed?'Allowed':'Denied'}</div>`;
 }
 
-/* ── Providers & Models ── */
-const PROVIDERS = {
-  ollama:       {icon:'🦙',badge:'O',models:['llama3.2:3b','tinyllama','phi3']},
-  openai:       {icon:'',badge:'O',models:['gpt-4o','gpt-4o-mini','gpt-4.1','gpt-4.1-mini','o3-mini']},
-  gemini:       {icon:'',badge:'G',models:['gemini-2.0-flash','gemini-2.5-pro','gemini-2.5-flash']},
-  anthropic:    {icon:'',badge:'A',models:['claude-sonnet-4-5','claude-opus-4','claude-haiku-3-5']},
-  codex:        {icon:'',badge:'C',models:['codexplan','gpt-4o']},
-  github:       {icon:'',badge:'H',models:['openai/gpt-4.1','openai/gpt-4o','meta/llama-3-70b']},
-  deepseek:     {icon:'',badge:'D',models:['deepseek-chat','deepseek-coder','deepseek-reasoner']},
-  groq:         {icon:'',badge:'Q',models:['llama-3.3-70b','mixtral-8x7b','gemma2-9b']},
-  together:     {icon:'',badge:'T',models:['meta-llama/Meta-Llama-3.1-70B','mistralai/Mixtral-8x22B']},
-  fireworks:    {icon:'',badge:'F',models:['llama-v3p1-70b','mixtral-8x22b','qwen2.5-72b']},
-  mistral:      {icon:'',badge:'M',models:['mistral-large','mistral-small','codestral']},
-  lmstudio:     {icon:'',badge:'L',models:['(auto-detect from LM Studio)']},
-  openrouter:   {icon:'',badge:'R',models:['auto','openai/gpt-4o','anthropic/claude-3.5-sonnet']},
-  bedrock:      {icon:'',badge:'B',models:['anthropic.claude-3-5-sonnet','anthropic.claude-3-haiku']},
-  vertex:       {icon:'',badge:'V',models:['claude-3-5-sonnet@20241022','gemini-2.0-flash']},
-  'atomic-chat':{icon:'',badge:'⚛',models:['(auto-detect local)']},
-  alibaba:      {icon:'',badge:'Q',models:['qwen-max','qwen-plus','qwen-turbo','qwen-max-longcontext','qwen2.5-72b-instruct','qwen2.5-32b-instruct','qwen2.5-14b-instruct','qwen2.5-7b-instruct','qwen2.5-coder-32b-instruct','qwen2.5-coder-7b-instruct','qwq-32b-preview','qwen-vl-max','qwen-vl-plus']},
-};
-let currentProvider = 'openai';
-let currentModel = 'gpt-5.4-mini';
+/* ── Providers & Models ──
+ * The manifest is fetched from /api/manifest on boot. The server (which
+ * reads src/web/providers.ts) is the only source of truth for provider
+ * IDs, models, labels, and the system default. We never hard-code any
+ * of those in the browser. */
+let PROVIDERS = {};                   // populated by /api/manifest
+let DEFAULT_PROVIDER_ID = 'openai';   // overwritten by /api/manifest
+let DEFAULT_MODEL_ID = 'gpt-5.4-mini';// overwritten by /api/manifest
+let currentProvider = DEFAULT_PROVIDER_ID;
+let currentModel = DEFAULT_MODEL_ID;
 
 function selectProvider(prov){
-  currentProvider = prov;
   const p = PROVIDERS[prov];
   if(!p) return;
+  currentProvider = prov;
   const badge = $('#provider-icon');
-  if(badge) badge.textContent = p.badge;
+  if(badge) badge.textContent = p.badge || '';
   const sel = $('#model-sel');
   if(sel){
     sel.innerHTML = '';
-    p.models.forEach((m,i)=>{
+    (p.models||[]).forEach((m,i)=>{
       const opt = document.createElement('option');
       opt.value = m; opt.textContent = m;
       if(i===0) opt.selected = true;
       sel.appendChild(opt);
     });
-    currentModel = p.models[0];
+    currentModel = (p.models && p.models[0]) || DEFAULT_MODEL_ID;
   }
   const provBadge = $('#provider-badge');
   if(provBadge) provBadge.textContent = '● ' + prov;
+  rememberSelection();
 }
-function selectModel(m){ currentModel = m; }
+function selectModel(m){ currentModel = m; rememberSelection(); }
+function rememberSelection(){
+  try{
+    localStorage.setItem('openllm-current-provider', currentProvider);
+    localStorage.setItem('openllm-current-model', currentModel);
+  }catch{}
+}
+
+/* Build the main provider <select> from the manifest. Marks providers
+ * with no server key and no client-saved key as "(no key)". */
+function buildProviderDropdown(){
+  const sel = $('#provider-sel');
+  if(!sel) return;
+  sel.innerHTML = '';
+  for(const id of Object.keys(PROVIDERS)){
+    const p = PROVIDERS[id];
+    const hasLocalKey = !!getApiKey(id);
+    const effective = p.configured || hasLocalKey;
+    providerStatus[id] = effective;
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = (p.label || id) + (effective ? '' : ' (no key)');
+    sel.appendChild(opt);
+  }
+  sel.value = currentProvider;
+}
+
+/* Build the Settings → Provider API Keys dropdown from the manifest.
+ * Only providers that take a key (envVar !== null) are listed. */
+function buildApiKeyDropdown(){
+  const sel = $('#apikey-provider-sel');
+  if(!sel) return;
+  sel.innerHTML = '';
+  for(const id of Object.keys(PROVIDERS)){
+    const p = PROVIDERS[id];
+    if(p.noKeyNeeded) continue;
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = p.label || id;
+    sel.appendChild(opt);
+  }
+  sel.value = currentProvider in PROVIDERS && !PROVIDERS[currentProvider].noKeyNeeded
+    ? currentProvider
+    : (sel.options[0]?.value || '');
+  loadApiKeyForProvider();
+}
 
 function addProject(){
   const name=prompt('Project name:');
@@ -914,40 +923,7 @@ function addProject(){
 /* ── Boot ── */
 renderAvatars();
 renderHome();
-selectProvider('openai');
-// Honor server-side default (OPENLLM_PROVIDER / OPENLLM_MODEL env vars)
-// exposed via /api/config. This lets the deploy workflow change the
-// default without touching client code.
-fetch('/api/config').then(r=>r.json()).then(cfg=>{
-  const p=cfg && cfg.provider && cfg.provider.name;
-  const m=cfg && cfg.provider && cfg.provider.model;
-  if(p && PROVIDERS[p]){
-    selectProvider(p);
-    if(m && m!=='default'){
-      currentModel=m;
-      const sel=$('#model-sel');
-      if(sel){
-        // Add the model if it's not already in the dropdown so the
-        // server-chosen value survives the selectProvider() reset.
-        let found=false;
-        for(const opt of sel.options){ if(opt.value===m){ found=true; break; } }
-        if(!found){
-          const opt=document.createElement('option');
-          opt.value=m; opt.textContent=m;
-          sel.appendChild(opt);
-        }
-        sel.value=m;
-      }
-    }
-    const sk=$('#apikey-provider-sel');
-    if(sk){ sk.value=currentProvider; loadApiKeyForProvider(); }
-  }
-}).catch(()=>{});
-// Sync the Settings → Provider API Keys dropdown to the active provider
-setTimeout(()=>{
-  const sel=$('#apikey-provider-sel');
-  if(sel){ sel.value=currentProvider; loadApiKeyForProvider(); }
-},50);
+
 // Restore remote URL from localStorage
 remoteWsUrl=null;
 const savedRemote=localStorage.getItem('openllm-remote-url');
@@ -959,33 +935,56 @@ if(savedRemote){
   remoteWsUrl=u;
 }
 connectWS();
-// Load saved sessions into home page
 loadSavedSessions();
 
-// Fetch available providers and mark unconfigured ones.
-// A provider is considered configured if EITHER:
-//   - the server has its env-var key set (info.configured), OR
-//   - the user has pasted a key into Settings → Provider API Keys
-//     (stored locally in localStorage under openllm-apikey-<provider>)
-// Both paths are legitimate — the client passes its key through the
-// WS payload and node-server.ts uses it as an override.
-fetch('/api/providers').then(r=>r.json()).then(data=>{
-  const sel=$('#provider-sel');
-  if(!sel)return;
-  for(const opt of sel.options){
-    const info=data[opt.value];
-    const hasLocalKey=!!getApiKey(opt.value);
-    const serverConfigured=info && info.configured;
-    const effective=serverConfigured || hasLocalKey;
-    providerStatus[opt.value]=effective;
-    if(!effective && !opt.textContent.endsWith(' (no key)')){
-      opt.textContent=opt.textContent+' (no key)';
-    }
-  }
-}).catch(()=>{});
+/* Fetch the provider manifest from the server (single source of truth
+ * defined in src/web/providers.ts). Resolve the active provider/model
+ * by checking, in order:
+ *   1. localStorage selection — but only if it still exists in the
+ *      manifest (otherwise it's stale and we ignore it)
+ *   2. server's DEFAULT_PROVIDER / DEFAULT_MODEL
+ * Then build dropdowns and trigger the local-models auto-detect. */
+fetch('/api/manifest').then(r=>r.json()).then(data=>{
+  PROVIDERS = data.providers || {};
+  DEFAULT_PROVIDER_ID = data.defaultProvider || 'openai';
+  DEFAULT_MODEL_ID = data.defaultModel || '';
 
-// Auto-detect Ollama models from server
+  // Resolve provider + desired model BEFORE touching the DOM. Anything
+  // saved in localStorage is only honored if it still exists in the
+  // manifest — otherwise it's stale (e.g. provider was removed).
+  const savedProv = localStorage.getItem('openllm-current-provider') || '';
+  const savedModel = localStorage.getItem('openllm-current-model') || '';
+  let resolvedProv, desiredModel;
+  if(savedProv && PROVIDERS[savedProv]){
+    resolvedProv = savedProv;
+    const models = PROVIDERS[savedProv].models || [];
+    desiredModel = (savedModel && models.includes(savedModel)) ? savedModel : (models[0] || DEFAULT_MODEL_ID);
+  } else {
+    resolvedProv = DEFAULT_PROVIDER_ID;
+    const models = (PROVIDERS[DEFAULT_PROVIDER_ID]||{}).models || [];
+    desiredModel = (DEFAULT_MODEL_ID && models.includes(DEFAULT_MODEL_ID)) ? DEFAULT_MODEL_ID : (models[0] || '');
+  }
+
+  buildProviderDropdown();
+  buildApiKeyDropdown();
+  // selectProvider() will reset currentModel to models[0], so re-apply
+  // desiredModel afterwards (both the variable AND the <select> value).
+  selectProvider(resolvedProv);
+  if(desiredModel){
+    currentModel = desiredModel;
+    const msel = $('#model-sel');
+    if(msel){
+      for(const o of msel.options){ if(o.value===desiredModel){ msel.value=desiredModel; break; } }
+    }
+    rememberSelection();
+  }
+  fetchOllamaModels();
+}).catch(e=>{ console.warn('[manifest] fetch failed:',e); });
+
+// Auto-detect Ollama models from server (only useful if the ollama
+// provider exists in the manifest and the user is currently on it).
 function fetchOllamaModels(){
+  if(!PROVIDERS.ollama) return Promise.resolve();
   return fetch('/api/ollama-models').then(r=>r.json()).then(models=>{
     if(Array.isArray(models)&&models.length){
       PROVIDERS.ollama.models=models;
@@ -998,7 +997,6 @@ function fetchOllamaModels(){
     }
   }).catch((e)=>{console.warn('[models] fetch failed:',e)});
 }
-fetchOllamaModels();
 
 /* ── Settings View ── */
 const settingsEl=$('#settings');

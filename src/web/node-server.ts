@@ -11,6 +11,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'http'
 import { readFileSync, existsSync } from 'fs'
 import { join, extname, resolve } from 'path'
 import { WebSocketServer, WebSocket } from 'ws'
+import { PROVIDERS, DEFAULT_PROVIDER, DEFAULT_MODEL, type ProviderDef } from './providers'
 
 const PUBLIC_DIR = resolve(import.meta.dirname || __dirname, 'public')
 const PORT = parseInt(process.env.OPENLLM_WEB_PORT || '5000', 10)
@@ -48,7 +49,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
   if (url === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ status: 'ok', version: '1.0.0', provider: process.env.OPENLLM_PROVIDER || 'ollama' }))
+    res.end(JSON.stringify({ status: 'ok', version: '1.0.0', provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL }))
     return true
   }
   if (url === '/api/status') {
@@ -67,15 +68,16 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     return true
   }
   if (url === '/api/config') {
+    const def = PROVIDERS[DEFAULT_PROVIDER]
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({
-      provider: { name: process.env.OPENLLM_PROVIDER || 'ollama', model: process.env.OPENLLM_MODEL || process.env.OPENAI_MODEL || 'default', baseUrl: process.env.OPENAI_BASE_URL || '' },
+      provider: { name: DEFAULT_PROVIDER, model: DEFAULT_MODEL, baseUrl: def?.baseUrl || '' },
     }))
     return true
   }
   if (url === '/api/ollama-models') {
     try {
-      const ollamaBase = PROVIDER_REGISTRY.ollama.baseUrl.replace(/\/v1$/, '')
+      const ollamaBase = PROVIDER_REGISTRY.ollama.def.baseUrl.replace(/\/v1$/, '')
       const r = await fetch(`${ollamaBase}/api/tags`)
       if (r.ok) {
         const data = await r.json() as { models?: Array<{name: string}> }
@@ -101,14 +103,35 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     }
     return true
   }
-  if (url === '/api/providers') {
-    const available: Record<string, {configured: boolean, defaultModel: string}> = {}
-    for (const [name, cfg] of Object.entries(PROVIDER_REGISTRY)) {
-      const noKeyNeeded = ['ollama', 'lmstudio', 'atomic-chat'].includes(name)
-      available[name] = { configured: noKeyNeeded || !!cfg.apiKey, defaultModel: cfg.defaultModel }
+  if (url === '/api/manifest' || url === '/api/providers') {
+    // Full provider manifest for the UI: defaults + per-provider def +
+    // a `configured` flag indicating whether the server has an env-var
+    // key for that provider (the client may still supply its own).
+    const providers: Record<string, {
+      id: string
+      label: string
+      badge: string
+      models: string[]
+      noKeyNeeded: boolean
+      configured: boolean
+    }> = {}
+    for (const [id, rt] of Object.entries(PROVIDER_REGISTRY)) {
+      const noKeyNeeded = !!rt.def.noKeyNeeded
+      providers[id] = {
+        id: rt.def.id,
+        label: rt.def.label,
+        badge: rt.def.badge,
+        models: rt.def.models,
+        noKeyNeeded,
+        configured: noKeyNeeded || !!rt.apiKey,
+      }
     }
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify(available))
+    res.end(JSON.stringify({
+      defaultProvider: DEFAULT_PROVIDER,
+      defaultModel: DEFAULT_MODEL,
+      providers,
+    }))
     return true
   }
   if (url === '/api/clear') {
@@ -126,39 +149,20 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 }
 
 // ── Provider Registry ──
-interface ProviderConfig {
-  baseUrl: string
+// Built once at boot from the static manifest in ./providers.ts. The
+// only per-runtime piece is the API key, which we read from the env var
+// each provider declares.
+interface ProviderRuntime {
+  def: ProviderDef
   apiKey: string
-  defaultModel: string
 }
 
-const PROVIDER_REGISTRY: Record<string, ProviderConfig> = {
-  ollama:     { baseUrl: 'http://localhost:11434/v1', apiKey: 'ollama', defaultModel: 'tinyllama' },
-  openai:     { baseUrl: 'https://api.openai.com/v1', apiKey: process.env.OPENAI_API_KEY || '', defaultModel: 'gpt-4o' },
-  gemini:     { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', apiKey: process.env.GEMINI_API_KEY || '', defaultModel: 'gemini-2.0-flash' },
-  anthropic:  { baseUrl: 'https://api.anthropic.com/v1', apiKey: process.env.ANTHROPIC_API_KEY || '', defaultModel: 'claude-sonnet-4-5-20241022' },
-  deepseek:   { baseUrl: 'https://api.deepseek.com/v1', apiKey: process.env.DEEPSEEK_API_KEY || '', defaultModel: 'deepseek-chat' },
-  groq:       { baseUrl: 'https://api.groq.com/openai/v1', apiKey: process.env.GROQ_API_KEY || '', defaultModel: 'llama-3.3-70b-versatile' },
-  together:   { baseUrl: 'https://api.together.xyz/v1', apiKey: process.env.TOGETHER_API_KEY || '', defaultModel: 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo' },
-  fireworks:  { baseUrl: 'https://api.fireworks.ai/inference/v1', apiKey: process.env.FIREWORKS_API_KEY || '', defaultModel: 'accounts/fireworks/models/llama-v3p1-70b-instruct' },
-  mistral:    { baseUrl: 'https://api.mistral.ai/v1', apiKey: process.env.MISTRAL_API_KEY || '', defaultModel: 'mistral-large-latest' },
-  lmstudio:   { baseUrl: 'http://localhost:1234/v1', apiKey: 'lm-studio', defaultModel: 'default' },
-  openrouter: { baseUrl: 'https://openrouter.ai/api/v1', apiKey: process.env.OPENROUTER_API_KEY || '', defaultModel: 'openai/gpt-4o' },
-  codex:      { baseUrl: 'https://api.openai.com/v1', apiKey: process.env.OPENAI_API_KEY || '', defaultModel: 'gpt-4o' },
-  github:     { baseUrl: 'https://models.inference.ai.azure.com', apiKey: process.env.GITHUB_TOKEN || '', defaultModel: 'openai/gpt-4o' },
-  bedrock:    { baseUrl: process.env.AWS_BEDROCK_URL || 'http://localhost:8000/v1', apiKey: process.env.AWS_ACCESS_KEY_ID || '', defaultModel: 'anthropic.claude-3-5-sonnet-20241022-v2:0' },
-  vertex:     { baseUrl: process.env.VERTEX_URL || 'http://localhost:8000/v1', apiKey: process.env.VERTEX_API_KEY || '', defaultModel: 'claude-3-5-sonnet@20241022' },
-  'atomic-chat': { baseUrl: 'http://localhost:11434/v1', apiKey: 'local', defaultModel: 'default' },
-  alibaba:    { baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', apiKey: process.env.DASHSCOPE_API_KEY || process.env.ALIBABA_API_KEY || '', defaultModel: 'qwen-max' },
-}
-
-// Override defaults from env if set
-if (process.env.OPENAI_BASE_URL) {
-  PROVIDER_REGISTRY.ollama.baseUrl = process.env.OPENAI_BASE_URL
-}
-if (process.env.OPENAI_MODEL) {
-  PROVIDER_REGISTRY.ollama.defaultModel = process.env.OPENAI_MODEL
-}
+const PROVIDER_REGISTRY: Record<string, ProviderRuntime> = Object.fromEntries(
+  Object.entries(PROVIDERS).map(([id, def]) => {
+    const apiKey = def.envVar ? (process.env[def.envVar] || '') : ''
+    return [id, { def, apiKey }]
+  })
+)
 
 // Per-session conversation history — shorter on mobile to save RAM
 const MAX_HISTORY = IS_TERMUX ? 5 : 10
@@ -174,12 +178,13 @@ function getConversation(provider: string, model: string) {
 }
 
 async function streamLLM(prompt: string, provider: string, model: string, broadcast: (msg: any) => void, overrideApiKey?: string): Promise<void> {
-  const cfg = PROVIDER_REGISTRY[provider] || PROVIDER_REGISTRY.ollama
-  const baseUrl = cfg.baseUrl
+  const rt = PROVIDER_REGISTRY[provider] || PROVIDER_REGISTRY[DEFAULT_PROVIDER]
+  const baseUrl = rt.def.baseUrl
   // Client-provided key (from Settings UI) overrides the server env var.
   // If client sends one, use it — otherwise fall back to the env-var key.
-  const apiKey = (overrideApiKey && overrideApiKey.trim()) || cfg.apiKey
-  const llmModel = model || cfg.defaultModel
+  const apiKey = (overrideApiKey && overrideApiKey.trim()) || rt.apiKey
+  const llmModel = model || rt.def.models[0] || DEFAULT_MODEL
+  const providerId = rt.def.id
 
   const history = getConversation(provider, llmModel)
   if (history.length === 0) {
@@ -191,8 +196,8 @@ async function streamLLM(prompt: string, provider: string, model: string, broadc
   const usage = { input_tokens: 0, output_tokens: 0, cost_usd: 0 }
   let fullReply = ''
 
-  if (!apiKey && provider !== 'ollama' && provider !== 'lmstudio' && provider !== 'atomic-chat') {
-    broadcast({ type: 'error', message: `No API key for ${provider}. Open Settings → Provider API Keys and paste one.` })
+  if (!apiKey && !rt.def.noKeyNeeded) {
+    broadcast({ type: 'error', message: `No API key for ${providerId}. Open Settings → Provider API Keys and paste one.` })
     broadcast({ type: 'done', usage })
     return
   }
@@ -204,7 +209,7 @@ async function streamLLM(prompt: string, provider: string, model: string, broadc
       body: JSON.stringify({
         model: llmModel, messages, stream: true,
         // Limit context window for local models — tighter on Termux
-        ...(provider === 'ollama' || provider === 'lmstudio' || provider === 'atomic-chat'
+        ...(rt.def.noKeyNeeded
           ? { options: { num_ctx: IS_TERMUX ? 1024 : 2048, num_predict: IS_TERMUX ? 128 : 256 } } : {}),
       }),
     })
@@ -260,8 +265,9 @@ async function streamLLM(prompt: string, provider: string, model: string, broadc
 
 // ── Main ──
 async function main() {
-  const defaultCfg = PROVIDER_REGISTRY.ollama
-  console.log(`[openllm] Default LLM: ${defaultCfg.baseUrl} model=${defaultCfg.defaultModel}`)
+  const defaultRt = PROVIDER_REGISTRY[DEFAULT_PROVIDER]
+  console.log(`[openllm] Default LLM: ${defaultRt.def.baseUrl} provider=${DEFAULT_PROVIDER} model=${DEFAULT_MODEL}`)
+  console.log(`[openllm] Default key source: ${defaultRt.def.envVar || '(none)'} ${defaultRt.apiKey ? '(set)' : '(MISSING)'}`)
   console.log(`[openllm] Providers: ${Object.keys(PROVIDER_REGISTRY).join(', ')}`)
 
   const server = createServer(async (req, res) => {
@@ -293,7 +299,7 @@ async function main() {
           conversations.clear()
           broadcast({ type: 'cleared' })
         } else if (msg.type === 'message' && msg.content) {
-          const provider = msg.provider || 'ollama'
+          const provider = msg.provider || DEFAULT_PROVIDER
           const model = msg.model || ''
           // Client may include an apiKey in the WS payload (entered in
           // Settings → Provider API Keys, persisted in localStorage).
