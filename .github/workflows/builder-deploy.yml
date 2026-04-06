@@ -312,7 +312,7 @@ jobs:
           VERSION="${{ steps.version.outputs.VERSION }}"
           PROVIDER="${{ github.event.inputs.provider }}"
 
-          echo "Starting OpenLLM Full Agent with provider: $PROVIDER"
+          echo "Starting OpenLLM FULL AGENT (mandatory, no fallback) with provider: $PROVIDER"
 
           # ── Create workspace with git context (QueryEngine needs it) ──
           mkdir -p /tmp/openllm-workspace
@@ -350,45 +350,46 @@ jobs:
           SERVER_PID=$!
 
           # ── Wait for health (QueryEngine takes longer to init) ──
-          echo "Waiting for full agent to start..."
+          # FULL AGENT ONLY — no fallback to chat relay. If the full agent
+          # (dist/cli.mjs serve) cannot start, the deploy must fail loudly so
+          # we know tools/skills are unavailable rather than serving a dumb
+          # chat relay that silently drops /skill and /run-skill commands.
+          echo "Waiting for full agent to start (up to 180s)..."
           HEALTH_OK="false"
-          for attempt in $(seq 1 30); do
+          for attempt in $(seq 1 60); do
             if curl -fsS http://localhost:3000/api/health > /dev/null 2>&1; then
               HEALTH_OK="true"
-              echo "Agent healthy on attempt $attempt"
+              echo "Full agent healthy on attempt $attempt"
               break
             fi
             sleep 3
           done
 
           if [ "$HEALTH_OK" != "true" ]; then
-            echo "Agent did not become healthy — falling back to node-server..."
+            echo "============================================"
+            echo "  FATAL: Full agent did not become healthy"
+            echo "============================================"
+            echo "Deploy policy: full-agent-only (no chat-relay fallback)."
+            echo "Dumping server.log for diagnosis:"
+            echo "--------------------------------------------"
             cat server.log || true
+            echo "--------------------------------------------"
             kill $SERVER_PID 2>/dev/null || true
-
-            # Fallback: use node-server.ts (chat-only, no tools)
-            npm install -g tsx ws
-            OPENLLM_WEB_PORT=3000 \
-              npx tsx src/web/node-server.ts > server.log 2>&1 &
-            SERVER_PID=$!
-
-            for attempt in $(seq 1 15); do
-              if curl -fsS http://localhost:3000/api/health > /dev/null 2>&1; then
-                echo "Fallback server healthy on attempt $attempt"
-                HEALTH_OK="true"
-                break
-              fi
-              sleep 3
-            done
-
-            if [ "$HEALTH_OK" != "true" ]; then
-              echo "Both servers failed"
-              cat server.log || true
-              exit 1
-            fi
+            exit 1
           fi
 
-          echo "Server healthy!"
+          # ── Verify the agent actually has tools (not a chat relay) ──
+          echo "Verifying full-agent capabilities..."
+          HEALTH_BODY=$(curl -fsS http://localhost:3000/api/health || echo '{}')
+          echo "Health response: $HEALTH_BODY"
+          if echo "$HEALTH_BODY" | grep -qi '"mode"[[:space:]]*:[[:space:]]*"chat-relay"'; then
+            echo "FATAL: Health endpoint reports chat-relay mode — full agent not running."
+            cat server.log || true
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "Full agent healthy and tool-capable."
 
           # ── Start Cloudflare tunnel ──
           echo "Starting Cloudflare tunnel..."
@@ -419,6 +420,7 @@ jobs:
           echo "  Version:  v${VERSION}"
           echo "  URL:      $TUNNEL_URL"
           echo "  Provider: $PROVIDER"
+          echo "  Mode:     FULL AGENT (QueryEngine + 51 tools)"
           echo "  UI:       Home + Chat (WebSocket streaming)"
           echo "  Duration: ${{ github.event.inputs.duration }} minutes"
           echo "============================================"
