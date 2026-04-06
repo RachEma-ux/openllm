@@ -147,6 +147,34 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 /* Toast */
 .toast{position:fixed;bottom:20px;right:20px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:13px;color:var(--text);z-index:999;animation:fadein .2s}
 
+/* Top App Bar (shared header with hamburger) */
+.app-bar{display:flex;align-items:center;gap:12px;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top));border-bottom:1px solid var(--border);background:var(--bg);flex-shrink:0;min-height:48px}
+.app-bar-ham{background:none;border:none;color:var(--text);cursor:pointer;width:40px;height:40px;display:flex;flex-direction:column;justify-content:center;gap:4px;padding:6px;border-radius:6px}
+.app-bar-ham:hover{background:var(--bg2)}
+.app-bar-ham span{display:block;height:2px;background:var(--text);border-radius:2px;width:22px}
+.app-bar-title{flex:1;font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.app-bar-actions{display:flex;gap:6px;align-items:center}
+.app-bar-btn{background:none;border:none;color:var(--dim);cursor:pointer;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:6px}
+.app-bar-btn:hover{background:var(--bg2);color:var(--text)}
+
+/* Drawer (mobile menu) */
+.drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:500;opacity:0;pointer-events:none;transition:opacity .2s}
+.drawer-overlay.open{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;left:0;bottom:0;width:280px;max-width:85vw;background:var(--bg2);border-right:1px solid var(--border);z-index:501;transform:translateX(-100%);transition:transform .25s ease-out;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);overflow-y:auto}
+.drawer.open{transform:translateX(0)}
+.drawer-hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--border)}
+.drawer-title{font-size:16px;font-weight:700}
+.drawer-close{background:none;border:none;color:var(--dim);font-size:22px;cursor:pointer;width:36px;height:36px;border-radius:6px;display:flex;align-items:center;justify-content:center}
+.drawer-close:hover{background:var(--bg3);color:var(--text)}
+.drawer-section{padding:12px 0}
+.drawer-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);padding:0 18px;margin-bottom:6px}
+.drawer-item{display:flex;align-items:center;gap:12px;padding:12px 18px;cursor:pointer;color:var(--text);font-size:14px;border:none;background:none;width:100%;text-align:left;font-family:inherit}
+.drawer-item:hover,.drawer-item.active{background:var(--bg3)}
+.drawer-item svg{flex-shrink:0;color:var(--dim)}
+.drawer-item-label{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.drawer-item-meta{font-size:11px;color:var(--muted)}
+.drawer-sep{height:1px;background:var(--border);margin:8px 18px}
+
 /* Code blocks */
 .msg-bot pre{position:relative}
 .msg-bot pre code{font-size:13px;line-height:1.5}
@@ -195,6 +223,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 @media(max-width:700px){
   .rail{display:none}
   .panel{display:none}
+  .mobile-nav{display:none !important}
   #app{flex-direction:column;height:100dvh}
   .main{height:100dvh}
   .composer{padding:6px 8px 10px;padding-bottom:calc(6px + env(safe-area-inset-bottom))}
@@ -204,7 +233,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
   .msg{max-width:92%}
   .msg-user{padding:12px 16px;font-size:15px}
   .msg-bot{font-size:15px}
-  .chat-hdr{padding:8px 12px;padding-top:calc(8px + env(safe-area-inset-top))}
+  .app-bar{padding:8px 12px;padding-top:calc(8px + env(safe-area-inset-top))}
   .tabs .tab{padding:12px 0;font-size:16px}
   .sess-pane{padding:12px 10px}
   .tcard-hdr{padding:12px 14px}
@@ -257,6 +286,22 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 
   <!-- Main Content -->
   <div class="main">
+    <!-- Shared Top App Bar -->
+    <div class="app-bar">
+      <button class="app-bar-ham" onclick="openDrawer()" title="Menu" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+      <div class="app-bar-title" id="app-bar-title">OpenLLM</div>
+      <div class="app-bar-actions">
+        <button class="app-bar-btn" onclick="newSession()" title="New Session" aria-label="New Session">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button class="app-bar-btn" onclick="showSettings()" title="Settings" aria-label="Settings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        </button>
+      </div>
+    </div>
+
     <!-- HOME VIEW -->
     <div id="home">
       <div class="hero">
@@ -277,11 +322,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 
     <!-- CHAT VIEW -->
     <div id="chat">
-      <!-- App Header -->
-      <div class="chat-hdr">
-        <button class="chat-back" onclick="goHome()" title="Back">
-          <span></span><span></span><span></span>
-        </button>
+      <!-- Chat-specific icons row (kept for status) -->
+      <div class="chat-hdr" style="display:none">
         <div class="chat-icons">
           <div class="chat-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
@@ -457,6 +499,44 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
         <h3>About</h3>
         <div class="setting-row"><span class="setting-label">OpenLLM</span><span class="setting-value">v1.0.0</span></div>
         <div class="setting-row"><span class="setting-label">Engine</span><span class="setting-value" id="settings-engine">node-server (chat)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drawer (mobile menu) -->
+  <div class="drawer-overlay" id="drawer-overlay" onclick="closeDrawer()"></div>
+  <div class="drawer" id="drawer">
+    <div class="drawer-hdr">
+      <div class="drawer-title">OpenLLM</div>
+      <button class="drawer-close" onclick="closeDrawer()" aria-label="Close">×</button>
+    </div>
+    <div class="drawer-section">
+      <button class="drawer-item" onclick="drawerGo('home')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span class="drawer-item-label">Home</span>
+      </button>
+      <button class="drawer-item" onclick="drawerGo('new')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <span class="drawer-item-label">New Session</span>
+      </button>
+      <button class="drawer-item" onclick="drawerGo('settings')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        <span class="drawer-item-label">Settings</span>
+      </button>
+    </div>
+    <div class="drawer-sep"></div>
+    <div class="drawer-section">
+      <div class="drawer-section-title">Recent Sessions</div>
+      <div id="drawer-sessions"></div>
+    </div>
+    <div class="drawer-sep"></div>
+    <div class="drawer-section">
+      <div class="drawer-section-title">Provider</div>
+      <div class="drawer-item" style="cursor:default">
+        <span class="drawer-item-label" id="drawer-provider">Ollama / llama3.2:3b</span>
+      </div>
+      <div class="drawer-item" style="cursor:default">
+        <span class="drawer-item-label" id="drawer-status">● Connecting...</span>
       </div>
     </div>
   </div>
@@ -805,6 +885,7 @@ function showSettings(){
   chatEl.classList.remove('show');
   settingsEl.classList.add('show');
   view='settings';
+  const t=$('#app-bar-title');if(t)t.textContent='Settings';
   refreshSettings();
 }
 function hideSettings(){
@@ -855,16 +936,17 @@ function refreshSettings(){
 let currentSessionId=null;
 let currentMessages=[];
 
-// Update goHome to also hide settings
+// Update goHome to also hide settings + reset app bar title
 const _goHome=goHome;
 goHome=function(){
   hideSettings();
   view='home';
   chatEl.classList.remove('show');
   homeEl.classList.remove('hide');
+  const t=$('#app-bar-title');if(t)t.textContent='OpenLLM';
 }
 
-// Update openChat to also hide settings + init session
+// Update openChat to also hide settings + init session + set app bar title
 const _openChat=openChat;
 openChat=function(title){
   hideSettings();
@@ -872,6 +954,7 @@ openChat=function(title){
   homeEl.classList.add('hide');
   chatEl.classList.add('show');
   chatTitle.textContent=title||'New Session';
+  const t=$('#app-bar-title');if(t)t.textContent=title||'New Session';
   messagesEl.innerHTML='';
   streamBuf='';streaming=false;
   currentSessionId='s_'+Date.now();
@@ -1003,6 +1086,55 @@ function clearAllData(){
   dbClearAll();
   localStorage.clear();
   location.reload();
+}
+
+/* ── Drawer (Hamburger Menu) ── */
+function openDrawer(){
+  const overlay=$('#drawer-overlay'),drawer=$('#drawer');
+  if(!overlay||!drawer)return;
+  overlay.classList.add('open');
+  drawer.classList.add('open');
+  populateDrawer();
+}
+function closeDrawer(){
+  $('#drawer-overlay')?.classList.remove('open');
+  $('#drawer')?.classList.remove('open');
+}
+function drawerGo(action){
+  closeDrawer();
+  if(action==='home')goHome();
+  else if(action==='new')newSession();
+  else if(action==='settings')showSettings();
+}
+
+async function populateDrawer(){
+  // Recent sessions
+  const container=$('#drawer-sessions');
+  if(container){
+    const sessions=await dbGetSessions();
+    if(!sessions.length){
+      container.innerHTML='<div class="drawer-item" style="cursor:default;color:var(--muted);font-size:12px">No sessions yet</div>';
+    }else{
+      container.innerHTML='';
+      sessions.slice(0,6).forEach(s=>{
+        const btn=document.createElement('button');
+        btn.className='drawer-item';
+        const ago=Math.round((Date.now()-s.updatedAt)/60000);
+        const t=ago<60?ago+'m':Math.round(ago/60)+'h';
+        btn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg><span class="drawer-item-label">'+esc(s.title)+'</span><span class="drawer-item-meta">'+t+'</span>';
+        btn.onclick=()=>{closeDrawer();resumeSession(s)};
+        container.appendChild(btn);
+      });
+    }
+  }
+  // Provider + status
+  const p=$('#drawer-provider');if(p)p.textContent=currentProvider+' / '+currentModel;
+  const s=$('#drawer-status');
+  if(s){
+    const connected=ws&&ws.readyState===1;
+    s.textContent=connected?'● Connected':'● Offline';
+    s.style.color=connected?'var(--green)':'var(--red)';
+  }
 }
 
 /* ── Theme Toggle ── */
