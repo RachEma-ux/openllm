@@ -286,11 +286,16 @@ jobs:
           echo "Available models:"
           ollama list
 
-      - name: Install cloudflared
+      - name: Install localtunnel
         if: ${{ github.event.inputs.run_app == 'yes' }}
         run: |
-          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
-          chmod +x cloudflared
+          # localtunnel replaces cloudflared. Cloudflare QuickTunnels
+          # (trycloudflare.com) route through Workers, which cannot
+          # proxy HTTP 101 (WebSocket upgrade) responses — so the chat
+          # UI's wss:// connection always fails on QuickTunnel URLs.
+          # localtunnel supports WebSocket upgrades natively.
+          npm install -g localtunnel
+          lt --version || true
 
       - name: Start application with tunnel
         if: ${{ github.event.inputs.run_app == 'yes' }}
@@ -324,16 +329,30 @@ jobs:
           git add . && git commit -m "init"
 
           # ── Configure provider ──
+          # CRITICAL: Claude Code's auth layer (src/utils/auth.ts) only
+          # recognizes CLAUDE_CODE_USE_* flags for 3P provider detection.
+          # Setting OPENLLM_PROVIDER alone is not enough — when CI=true
+          # (GitHub Actions sets this), auth.ts throws
+          # "ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN env var is required"
+          # unless one of the CLAUDE_CODE_USE_* flags is true.
           if [ "$PROVIDER" = "ollama" ]; then
+            # Route through Claude Code's OpenAI-compatible transport
+            export CLAUDE_CODE_USE_OPENAI=1
             export OPENAI_BASE_URL="http://localhost:11434/v1"
+            export OPENAI_API_BASE="http://localhost:11434/v1"
             export OPENAI_MODEL="llama3.2:3b"
+            # Ollama doesn't check the API key but the SDK refuses empty
+            export OPENAI_API_KEY="ollama-local-no-auth-required"
+            # OpenLLM-native config (read by web server UI layer)
             export OPENLLM_PROVIDER="ollama"
             export OPENLLM_MODEL="llama3.2:3b"
             export OPENLLM_BASE_URL="http://localhost:11434/v1"
           elif [ "$PROVIDER" = "openai" ]; then
+            export CLAUDE_CODE_USE_OPENAI=1
             export OPENLLM_PROVIDER="openai"
             export OPENLLM_MODEL="${OPENAI_MODEL:-gpt-4o}"
           elif [ "$PROVIDER" = "gemini" ]; then
+            export CLAUDE_CODE_USE_GEMINI=1
             export OPENLLM_PROVIDER="gemini"
             export OPENLLM_MODEL="gemini-2.0-flash"
             export GOOGLE_API_KEY="$GEMINI_API_KEY"
@@ -408,46 +427,43 @@ jobs:
 
           echo "Full agent healthy and tool-capable."
 
-          # ── Start Cloudflare tunnel (with retry loop) ──
-          # Cloudflare QuickTunnel (trycloudflare.com) sometimes returns
-          # "error code: 1101" with a 500, leaving no URL in tunnel.log.
-          # Retry up to 3 times with exponential backoff (10s, 20s, 40s)
-          # before giving up — each attempt kills the prior cloudflared
-          # process and starts fresh.
+          # ── Start localtunnel (with retry loop) ──
+          # localtunnel supports WebSocket upgrades (HTTP 101), unlike
+          # Cloudflare QuickTunnels. URL format: https://xxx.loca.lt
+          # On first visit, browsers see an interstitial asking for the
+          # "tunnel password" which is the runner's public egress IP —
+          # we print it below so the user can copy/paste.
           TUNNEL_URL=""
           TUNNEL_PID=""
           TUNNEL_MAX_ATTEMPTS=3
           TUNNEL_BACKOFF=10
 
+          # Fetch runner's public IP (used as localtunnel password prompt)
+          RUNNER_IP=$(curl -fsS --max-time 5 https://ipv4.icanhazip.com 2>/dev/null | tr -d '[:space:]' || echo "unknown")
+          echo "Runner public IP (localtunnel password): $RUNNER_IP"
+
           for tunnel_try in $(seq 1 $TUNNEL_MAX_ATTEMPTS); do
             echo "============================================"
-            echo "  Cloudflare tunnel attempt $tunnel_try of $TUNNEL_MAX_ATTEMPTS"
+            echo "  localtunnel attempt $tunnel_try of $TUNNEL_MAX_ATTEMPTS"
             echo "============================================"
 
-            # Clean slate: fresh log file, kill any prior cloudflared
+            # Clean slate: fresh log file, kill any prior lt
             if [ -n "$TUNNEL_PID" ]; then
               kill $TUNNEL_PID 2>/dev/null || true
               wait $TUNNEL_PID 2>/dev/null || true
             fi
             : > tunnel.log
 
-            "$GITHUB_WORKSPACE/cloudflared" tunnel --url http://localhost:5000 2>&1 | tee tunnel.log &
+            # lt prints "your url is: https://xxx.loca.lt" on startup
+            lt --port 5000 --print-requests 2>&1 | tee tunnel.log &
             TUNNEL_PID=$!
 
-            # Poll tunnel.log for the trycloudflare URL (up to 60s per attempt)
+            # Poll tunnel.log for the loca.lt URL (up to 60s per attempt)
             for poll in $(seq 1 12); do
-              TUNNEL_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1 || true)
+              TUNNEL_URL=$(grep -o 'https://[a-z0-9-]*\.loca\.lt' tunnel.log | head -1 || true)
               if [ -n "$TUNNEL_URL" ]; then
                 echo "Tunnel URL acquired on try $tunnel_try (poll $poll): $TUNNEL_URL"
                 break 2
-              fi
-              # Early-exit on known Cloudflare infrastructure errors to
-              # avoid waiting 60s when trycloudflare is already refusing.
-              if grep -q "error code: 1101\|QuickTunnel response" tunnel.log 2>/dev/null; then
-                if [ $poll -ge 4 ]; then
-                  echo "Cloudflare 1101/QuickTunnel error detected — giving up this attempt early"
-                  break
-                fi
               fi
               sleep 5
             done
@@ -468,15 +484,19 @@ jobs:
 
           if [ -z "$TUNNEL_URL" ]; then
             echo "============================================"
-            echo "  FATAL: Cloudflare tunnel never published a URL"
+            echo "  FATAL: localtunnel never published a URL"
             echo "  after $TUNNEL_MAX_ATTEMPTS attempts."
-            echo "  Likely cause: trycloudflare.com is having an"
-            echo "  outage (error 1101). Try again later or switch"
-            echo "  to a named tunnel / different provider."
             echo "============================================"
             cat tunnel.log || true
             exit 1
           fi
+
+          echo ""
+          echo "============================================"
+          echo "  IMPORTANT: first-visit interstitial"
+          echo "  On your first visit, localtunnel will ask"
+          echo "  for a 'tunnel password'. Enter: $RUNNER_IP"
+          echo "============================================"
 
           echo ""
           echo "============================================"
@@ -507,7 +527,8 @@ jobs:
               --arg dur "${{ github.event.inputs.duration }}" \
               --arg ts "$TIMESTAMP" \
               --arg prov "$PROVIDER" \
-              '{tunnel_url: $url, version: $ver, run_id: $rid, repository: $repo, status: "running", duration_minutes: ($dur|tonumber), started_at: $ts, provider: $prov}')
+              --arg ltpwd "$RUNNER_IP" \
+              '{tunnel_url: $url, version: $ver, run_id: $rid, repository: $repo, status: "running", duration_minutes: ($dur|tonumber), started_at: $ts, provider: $prov, tunnel_password: $ltpwd}')
 
             PAYLOAD=$(jq -n --arg content "$GIST_JSON" '{files: {"tunnel-status.json": {content: $content}}}')
 
