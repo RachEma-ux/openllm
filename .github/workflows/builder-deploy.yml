@@ -29,6 +29,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: builder-deploy
+  cancel-in-progress: false
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -444,7 +448,9 @@ jobs:
           # Cleanup
           kill $SERVER_PID 2>/dev/null || true
           kill $TUNNEL_PID 2>/dev/null || true
-          [ -n "$OLLAMA_PID" ] && kill $OLLAMA_PID 2>/dev/null || true
+          if [ -n "$OLLAMA_PID" ]; then
+            kill $OLLAMA_PID 2>/dev/null || true
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
