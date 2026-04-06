@@ -740,7 +740,17 @@ function saveApiKey(){
   const p=sel.value; const k=inp.value.trim();
   if(!k){ if(st){st.textContent='⚠ Key is empty — nothing saved';st.style.color='var(--yellow)';} return; }
   localStorage.setItem('openllm-apikey-'+p, k);
-  if(st){st.textContent='✓ Saved for '+p;st.style.color='var(--green)';}
+  providerStatus[p]=true;
+  // Strip the "(no key)" suffix from the main provider dropdown option
+  const mainSel=$('#provider-sel');
+  if(mainSel){
+    for(const opt of mainSel.options){
+      if(opt.value===p && opt.textContent.endsWith(' (no key)')){
+        opt.textContent=opt.textContent.replace(/ \(no key\)$/,'');
+      }
+    }
+  }
+  if(st){st.textContent='✓ Saved for '+p+' — provider is now configured';st.style.color='var(--green)';}
 }
 function clearApiKey(){
   const sel=$('#apikey-provider-sel'); const inp=$('#apikey-input'); const st=$('#apikey-status');
@@ -748,6 +758,17 @@ function clearApiKey(){
   const p=sel.value;
   localStorage.removeItem('openllm-apikey-'+p);
   inp.value='';
+  providerStatus[p]=false;
+  // Restore the "(no key)" suffix in the main dropdown if the server
+  // also doesn't have one configured.
+  const mainSel=$('#provider-sel');
+  if(mainSel){
+    for(const opt of mainSel.options){
+      if(opt.value===p && !opt.textContent.endsWith(' (no key)')){
+        opt.textContent=opt.textContent+' (no key)';
+      }
+    }
+  }
   if(st){st.textContent='○ Cleared for '+p;st.style.color='var(--dim)';}
 }
 
@@ -913,15 +934,24 @@ connectWS();
 // Load saved sessions into home page
 loadSavedSessions();
 
-// Fetch available providers and mark unconfigured ones
+// Fetch available providers and mark unconfigured ones.
+// A provider is considered configured if EITHER:
+//   - the server has its env-var key set (info.configured), OR
+//   - the user has pasted a key into Settings → Provider API Keys
+//     (stored locally in localStorage under openllm-apikey-<provider>)
+// Both paths are legitimate — the client passes its key through the
+// WS payload and node-server.ts uses it as an override.
 fetch('/api/providers').then(r=>r.json()).then(data=>{
   const sel=$('#provider-sel');
   if(!sel)return;
   for(const opt of sel.options){
     const info=data[opt.value];
-    if(info){
-      providerStatus[opt.value]=info.configured;
-      if(!info.configured) opt.textContent=opt.textContent+' (no key)';
+    const hasLocalKey=!!getApiKey(opt.value);
+    const serverConfigured=info && info.configured;
+    const effective=serverConfigured || hasLocalKey;
+    providerStatus[opt.value]=effective;
+    if(!effective && !opt.textContent.endsWith(' (no key)')){
+      opt.textContent=opt.textContent+' (no key)';
     }
   }
 }).catch(()=>{});
