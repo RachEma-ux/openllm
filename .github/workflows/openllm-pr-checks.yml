@@ -36,7 +36,7 @@ jobs:
         run: bun run smoke
 
       - name: Full unit test suite
-        run: bun test --max-concurrency=1
+        run: bun test src scripts --max-concurrency=1
 
       - name: VS Code extension package smoke test
         working-directory: vscode-extension/openclaude-vscode
