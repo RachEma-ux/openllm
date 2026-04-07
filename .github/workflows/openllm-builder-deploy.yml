@@ -267,6 +267,17 @@ jobs:
             "checksums.sha256" \
             "${VSIX_NAME}"
 
+      - name: Mark deploy successful (no-tunnel mode)
+        if: ${{ github.event.inputs.run_app != 'yes' }}
+        run: |
+          # When run_app=no, the release is the success milestone — there
+          # is no tunnel-live step later to set the marker. Without this,
+          # the "Delete workflow run after successful deploy" cleanup step
+          # always keeps the run in history because the marker is only
+          # otherwise set inside "Start application with tunnel".
+          touch "$RUNNER_TEMP/.deploy-success"
+          echo "✅ Marked deploy successful (release published, no tunnel requested)"
+
       # ========== RUN PHASE (Optional) ==========
       # Provider/model defaults live in src/web/providers.ts (the single
       # source of truth). The chat relay (src/web/node-server.ts) reads
