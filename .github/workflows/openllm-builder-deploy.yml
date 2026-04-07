@@ -267,17 +267,6 @@ jobs:
             "checksums.sha256" \
             "${VSIX_NAME}"
 
-      - name: Mark deploy successful (no-tunnel mode)
-        if: ${{ github.event.inputs.run_app != 'yes' }}
-        run: |
-          # When run_app=no, the release is the success milestone — there
-          # is no tunnel-live step later to set the marker. Without this,
-          # the "Delete workflow run after successful deploy" cleanup step
-          # always keeps the run in history because the marker is only
-          # otherwise set inside "Start application with tunnel".
-          touch "$RUNNER_TEMP/.deploy-success"
-          echo "✅ Marked deploy successful (release published, no tunnel requested)"
-
       # ========== RUN PHASE (Optional) ==========
       # Provider/model defaults live in src/web/providers.ts (the single
       # source of truth). The chat relay (src/web/node-server.ts) reads
@@ -444,11 +433,6 @@ jobs:
           # Save URL
           echo "$TUNNEL_URL" > app_url.txt
 
-          # Mark the deploy as successful so the final cleanup step knows
-          # that any subsequent timeout/cancellation is "after a successful
-          # run" and the workflow run can be deleted from history.
-          touch "$RUNNER_TEMP/.deploy-success"
-
           # Update Gist with tunnel URL
           echo "📤 Updating Gist with tunnel URL..."
           GIST_ID="${{ vars.TUNNEL_GIST_ID }}"
@@ -562,38 +546,8 @@ jobs:
             echo "App will be available for ${{ github.event.inputs.duration }} minutes." >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Delete workflow run after successful deploy
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Only delete the run if the deploy reached the "tunnel is live"
-          # milestone. That way a build/release failure stays visible in
-          # Actions history, but a successful run that later times out or
-          # is cancelled gets removed automatically.
-          if [ ! -f "$RUNNER_TEMP/.deploy-success" ]; then
-            echo "ℹ️ Deploy-success marker not set; keeping workflow run."
-            exit 0
-          fi
-
-          JOB_STATUS="${{ job.status }}"
-          if [ "$JOB_STATUS" != "success" ] && [ "$JOB_STATUS" != "cancelled" ]; then
-            echo "ℹ️ Job status is '$JOB_STATUS'; keeping workflow run."
-            exit 0
-          fi
-
-          echo "🗑️  Deploy succeeded (status=$JOB_STATUS). Deleting workflow run ${{ github.run_id }}..."
-          # Fire the DELETE synchronously. An earlier version of this step
-          # backgrounded the call with a 5s sleep, hoping the runner would
-          # finish post-job cleanup before the deletion landed — but in
-          # practice the backgrounded subshell was getting killed by runner
-          # teardown before the sleep finished, so the API call never went
-          # out and the run stayed in history. Calling the API in-step
-          # dispatches the request immediately; the runner being killed
-          # mid-curl is fine because GitHub already received the request
-          # by then. The trailing `|| true` swallows any non-zero exit so
-          # the step is never the cause of a job failure.
-          gh api -X DELETE "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            && echo "✅ Workflow run delete request dispatched" \
-            || echo "⚠️ Failed to dispatch workflow run delete (continuing anyway)"
-          true
+      # NOTE: Deletion of completed deploy runs is handled by the
+      # openllm-cleanup-deploys workflow, which runs on workflow_run:
+      # completed in a fresh runner. We can't delete from inside this
+      # job because GitHub's REST API refuses to delete a workflow run
+      # that's still in `in_progress` state (returns 403).

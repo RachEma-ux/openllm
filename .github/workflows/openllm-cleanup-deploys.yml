@@ -1,0 +1,41 @@
+name: OpenLLM Cleanup Deploys
+
+# Auto-deletes successful or cancelled OpenLLM Builder Deploy runs from
+# Actions history. Runs in a fresh runner via the workflow_run trigger
+# AFTER the deploy run has reached `completed` state, because GitHub's
+# REST API refuses to DELETE a workflow run that's still `in_progress`
+# (returns 403). An earlier in-step delete inside builder-deploy was
+# silently failing for this reason.
+#
+# Failure runs (build/release errors, tunnel-published-but-job-failed)
+# stay in history because they're useful for debugging.
+
+on:
+  workflow_run:
+    workflows: ["OpenLLM Builder Deploy"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  delete-completed-run:
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'cancelled' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Delete the deploy workflow run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+          echo "🗑️  Deleting OpenLLM Builder Deploy run $RUN_ID (conclusion=$CONCLUSION)..."
+          if gh api -X DELETE "/repos/${{ github.repository }}/actions/runs/$RUN_ID"; then
+            echo "✅ Deleted run $RUN_ID"
+          else
+            echo "⚠️ Failed to delete run $RUN_ID"
+            exit 1
+          fi
