@@ -1,6 +1,32 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { mock } = require('bun:test');
+
+// Intercept require('vscode') so the extension can be loaded outside the
+// VS Code host. The repo runs this file under both `node --test` (via the
+// extension's own package.json script and the new openllm-pr-checks step)
+// and `bun test` (via the parent project's globbing test runner). Bun's
+// native resolver does NOT consult node:module's Module._load hook, so
+// pure-Node patching is not enough on its own — bun:test's mock.module
+// is needed for the bun path. We install both and let whichever runtime
+// is active win.
+let vscodeStub = null;
+let installBunMock = null;
+try {
+  // Bun runtime: bun:test exists, set up mock.module hook lazily.
+  const { mock } = require('bun:test');
+  installBunMock = () => mock.module('vscode', () => vscodeStub);
+} catch (_) {
+  // Node runtime: bun:test does not exist. Patch Module._load so
+  // require('vscode') from extension.js resolves to vscodeStub.
+  const Module = require('node:module');
+  const originalLoad = Module._load;
+  Module._load = function patchedLoad(request, parent, ...rest) {
+    if (request === 'vscode' && vscodeStub) {
+      return vscodeStub;
+    }
+    return originalLoad.call(this, request, parent, ...rest);
+  };
+}
 
 function createStatus(overrides = {}) {
   return {
@@ -30,7 +56,7 @@ function createStatus(overrides = {}) {
 function loadExtension() {
   const extensionPath = require.resolve('./extension');
   delete require.cache[extensionPath];
-  mock.module('vscode', () => ({
+  vscodeStub = {
     workspace: {
       workspaceFolders: [],
       getConfiguration: () => ({
@@ -54,7 +80,10 @@ function loadExtension() {
     },
     Uri: { parse: value => value, file: value => value },
     ViewColumn: { Active: 1 },
-  }));
+  };
+  if (installBunMock) {
+    installBunMock();
+  }
   return require('./extension');
 }
 

@@ -6,6 +6,7 @@ Use OpenAI-compatible APIs, Gemini, GitHub Models, Codex, Ollama, Atomic Chat, a
 
 [![OpenLLM PR Checks](https://github.com/Gitlawb/openclaude/actions/workflows/openllm-pr-checks.yml/badge.svg?branch=main)](https://github.com/Gitlawb/openclaude/actions/workflows/openllm-pr-checks.yml)
 [![Release](https://img.shields.io/github/v/tag/Gitlawb/openclaude?label=release&color=0ea5e9)](https://github.com/Gitlawb/openclaude/tags)
+[![Open in vscode.dev](https://img.shields.io/badge/Open%20in-vscode.dev-007ACC?logo=visualstudiocode&logoColor=white)](https://vscode.dev/github/RachEma-ux/openllm)
 [![Discussions](https://img.shields.io/badge/discussions-open-7c3aed)](https://github.com/Gitlawb/openclaude/discussions)
 [![Security Policy](https://img.shields.io/badge/security-policy-0f766e)](SECURITY.md)
 [![License](https://img.shields.io/badge/license-MIT-2563eb)](LICENSE)
@@ -259,6 +260,25 @@ Coverage output is written to `coverage/lcov.info`, and OpenClaude also generate
 ## VS Code Extension
 
 The repo includes a VS Code extension in [`vscode-extension/openclaude-vscode`](vscode-extension/openclaude-vscode) for OpenClaude launch integration, provider-aware control-center UI, and theme support.
+
+### Installing the extension
+
+Every release on the [Releases page](https://github.com/RachEma-ux/openllm/releases) ships a prebuilt `.vsix`:
+
+```bash
+# Download the latest release asset
+gh release download --repo RachEma-ux/openllm \
+  --pattern "openclaude-vscode-*.vsix"
+
+# Install into desktop VS Code (also works for Cursor and Windsurf)
+code --install-extension openclaude-vscode-v*.vsix
+```
+
+You still need the `openllm` CLI on your `PATH` separately — the extension is the editor companion, not the agent itself.
+
+### Browsing in vscode.dev
+
+You can browse this repo without installing anything via the [Open in vscode.dev](https://vscode.dev/github/RachEma-ux/openllm) badge above. Note: the bundled extension is desktop-only (it launches a real terminal), so the in-browser editor only gives you read/edit access to the source — not the launcher.
 
 ## Security
 
