@@ -77,7 +77,7 @@ openllm/
 ├── bin/
 │   └── openllm-termux.sh       # Termux launcher (Ollama + web UI)
 └── .github/workflows/
-    └── builder-deploy.yml       # GitHub Actions deploy with tunnel
+    └── openllm-builder-deploy.yml  # GitHub Actions deploy with tunnel
 ```
 
 ---
@@ -127,7 +127,7 @@ bash bin/openllm-termux.sh
 
 ### Deploy to GitHub Actions
 ```bash
-gh workflow run builder-deploy.yml --ref main \
+gh workflow run openllm-builder-deploy.yml --ref main \
   -f run_app=yes -f duration=30 -f provider=ollama
 # Wait ~3 min, check gist for tunnel URL
 ```

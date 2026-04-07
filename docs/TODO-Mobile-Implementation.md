@@ -108,7 +108,7 @@ Target: Make OpenLLM a first-class mobile experience on Android/Termux.
 
 ### 3.3 GitHub Actions Integration
 - [ ] Add "Deploy Agent" button in UI settings
-  - Triggers `builder-deploy.yml` via GitHub API
+  - Triggers `openllm-builder-deploy.yml` via GitHub API
   - Shows deploy progress
   - Auto-connects to tunnel URL when ready
 - [ ] Poll gist for tunnel URL

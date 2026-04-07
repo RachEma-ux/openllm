@@ -1,4 +1,4 @@
-name: Builder Deploy
+name: OpenLLM Builder Deploy
 
 on:
   workflow_dispatch:
@@ -31,7 +31,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: builder-deploy
+  group: openllm-builder-deploy
   cancel-in-progress: false
 
 jobs:
@@ -238,8 +238,7 @@ jobs:
       # browser localStorage and sent with every chat message).
       #
       # Ollama is installed on the same runner so the relay's localhost
-      # ollama provider works end-to-end. Pattern borrowed from
-      # RachEma-ux/MyNewAp1Claude/.github/workflows/builder-deploy.yml.
+      # ollama provider works end-to-end.
 
       - name: Install Ollama and pull tinyllama
         if: ${{ github.event.inputs.run_app == 'yes' }}
