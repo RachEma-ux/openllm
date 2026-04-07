@@ -38,6 +38,18 @@ jobs:
       - name: Full unit test suite
         run: bun test --max-concurrency=1
 
+      - name: VS Code extension package smoke test
+        working-directory: vscode-extension/openclaude-vscode
+        run: |
+          set -euo pipefail
+          echo "🧩 Linting extension JS..."
+          npm run lint
+          echo "🧩 Running extension unit tests..."
+          npm test
+          echo "🧩 Dry-run packaging extension..."
+          bunx @vscode/vsce package --no-dependencies --out /tmp/openclaude-vscode-prcheck.vsix
+          ls -lh /tmp/openclaude-vscode-prcheck.vsix
+
       - name: Suspicious PR intent scan
         if: github.event_name == 'pull_request'
         run: bun run security:pr-scan -- --base ${{ github.event.pull_request.base.sha }}
