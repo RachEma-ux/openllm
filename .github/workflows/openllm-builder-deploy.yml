@@ -583,12 +583,17 @@ jobs:
           fi
 
           echo "🗑️  Deploy succeeded (status=$JOB_STATUS). Deleting workflow run ${{ github.run_id }}..."
-          # Fire-and-forget in the background so the API call has time to
-          # dispatch before the runner is torn down by the deletion.
-          (
-            sleep 5
-            gh api -X DELETE "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-              && echo "✅ Workflow run deleted" \
-              || echo "⚠️ Failed to delete workflow run"
-          ) &
-          disown || true
+          # Fire the DELETE synchronously. An earlier version of this step
+          # backgrounded the call with a 5s sleep, hoping the runner would
+          # finish post-job cleanup before the deletion landed — but in
+          # practice the backgrounded subshell was getting killed by runner
+          # teardown before the sleep finished, so the API call never went
+          # out and the run stayed in history. Calling the API in-step
+          # dispatches the request immediately; the runner being killed
+          # mid-curl is fine because GitHub already received the request
+          # by then. The trailing `|| true` swallows any non-zero exit so
+          # the step is never the cause of a job failure.
+          gh api -X DELETE "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            && echo "✅ Workflow run delete request dispatched" \
+            || echo "⚠️ Failed to dispatch workflow run delete (continuing anyway)"
+          true
